@@ -17,7 +17,6 @@
       --rowB: #f9fafb;
       --hover: #eef2f7;
       --shadow: 0 10px 30px rgba(0, 0, 0, 0.05);
-      --radius: 18px;
     }
 
     * {
@@ -85,10 +84,6 @@
       outline: none;
     }
 
-    .search:focus {
-      border-color: #cbd5e1;
-    }
-
     .badge {
       display: inline-flex;
       align-items: center;
@@ -103,10 +98,6 @@
     }
 
     .list-head {
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
       padding: 18px 22px;
       border-bottom: 1px solid var(--line);
     }
@@ -187,10 +178,6 @@
         grid-template-columns: 1fr;
         gap: 6px;
       }
-
-      .size {
-        white-space: normal;
-      }
     }
   </style>
 </head>
@@ -198,7 +185,7 @@
   <main class="page">
     <section class="panel header">
       <h1 class="title">FSP PDF Arşivi</h1>
-      <p class="subtitle">PDF dosyaları <code>docs/düsseldorf/</code> klasöründen otomatik listelenir.</p>
+      <p class="subtitle">Varsayılan klasör: <code>docs/düsseldorf/</code></p>
 
       <div class="toolbar">
         <input id="searchInput" class="search" type="search" placeholder="PDF ara..." autocomplete="off" />
@@ -206,7 +193,7 @@
       </div>
 
       <div class="note">
-        Satıra tıklayınca PDF doğrudan açılır.
+        Satıra tıklayınca PDF görüntüleyici açılır.
       </div>
     </section>
 
@@ -255,24 +242,19 @@
       const units = ["B", "KB", "MB", "GB"];
       let value = bytes;
       let unitIndex = 0;
+
       while (value >= 1024 && unitIndex < units.length - 1) {
         value /= 1024;
         unitIndex += 1;
       }
+
       const precision = value >= 100 || unitIndex === 0 ? 0 : 1;
       return `${value.toFixed(precision)} ${units[unitIndex]}`;
     }
 
-    function getRepoBasePath() {
-      const pathParts = window.location.pathname.split("/").filter(Boolean);
-      const repoNameFromPath = pathParts.length > 0 ? pathParts[0] : "";
-      return repoNameFromPath ? `/${repoNameFromPath}` : "";
-    }
-
-    function buildPagesPdfUrl(fileName) {
-      const basePath = getRepoBasePath();
-      const folderSegments = folderPath.split("/").map(encodeURIComponent).join("/");
-      return `${window.location.origin}${basePath}/${folderSegments}/${encodeURIComponent(fileName)}`;
+    function buildViewerUrl(fileName) {
+      const encodedPath = `${folderPath}/${fileName}`;
+      return `viewer.html?file=${encodeURIComponent(encodedPath)}`;
     }
 
     function render(files) {
@@ -293,7 +275,7 @@
       for (const file of files) {
         const link = document.createElement("a");
         link.className = "row";
-        link.href = buildPagesPdfUrl(file.name);
+        link.href = buildViewerUrl(file.name);
 
         link.innerHTML = `
           <div class="name">${escapeHtml(formatName(file.name))}</div>
@@ -307,8 +289,8 @@
     function applyFilter() {
       const query = searchInputEl.value.trim().toLocaleLowerCase("tr");
       const filtered = allFiles.filter((file) => {
-        const text = `${file.name} ${formatName(file.name)}`.toLocaleLowerCase("tr");
-        return text.includes(query);
+        const haystack = `${file.name} ${formatName(file.name)}`.toLocaleLowerCase("tr");
+        return haystack.includes(query);
       });
       render(filtered);
     }
@@ -319,7 +301,7 @@
       try {
         const response = await fetch(apiUrl, {
           headers: {
-            "Accept": "application/vnd.github+json"
+            Accept: "application/vnd.github+json"
           }
         });
 
@@ -337,7 +319,7 @@
       } catch (error) {
         rowsEl.hidden = true;
         stateEl.hidden = false;
-        stateEl.textContent = "PDF listesi yüklenemedi. Klasör yolu veya repo ayarlarını kontrol et.";
+        stateEl.textContent = "PDF listesi yüklenemedi.";
         countBadgeEl.textContent = "Hata";
         console.error(error);
       }
