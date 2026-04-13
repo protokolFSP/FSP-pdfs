@@ -113,9 +113,11 @@
       outline: none;
     }
 
-    .badge {
+    .badge,
+    .action-btn {
       display: inline-flex;
       align-items: center;
+      justify-content: center;
       min-height: 44px;
       padding: 0 14px;
       border-radius: 12px;
@@ -124,6 +126,17 @@
       color: var(--muted);
       font-size: 14px;
       white-space: nowrap;
+      text-decoration: none;
+    }
+
+    .action-btn {
+      color: var(--text);
+      cursor: pointer;
+    }
+
+    .action-btn:disabled {
+      opacity: 0.6;
+      cursor: not-allowed;
     }
 
     .list-head {
@@ -234,6 +247,7 @@
       <div class="toolbar">
         <input id="searchInput" class="search" type="search" placeholder="PDF ara..." autocomplete="off" />
         <div id="countBadge" class="badge">Yükleniyor...</div>
+        <button id="zipBtn" class="action-btn" type="button">ZIP indir</button>
       </div>
 
       <div class="note">Satıra tıklayınca PDF görüntüleyici açılır.</div>
@@ -251,6 +265,7 @@
     </section>
   </main>
 
+  <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script>
     const owner = "protokolFSP";
     const repo = "FSP-pdfs";
@@ -271,6 +286,7 @@
     const rowsEl = document.getElementById("rows");
     const countBadgeEl = document.getElementById("countBadge");
     const searchInputEl = document.getElementById("searchInput");
+    const zipBtnEl = document.getElementById("zipBtn");
 
     let allFiles = [];
 
@@ -336,6 +352,10 @@
       return `viewer.html?pdf=${encodeURIComponent(pdfUrl)}&name=${encodeURIComponent(fileName)}&folder=${encodeURIComponent(currentFolderKey)}`;
     }
 
+    function getCurrentFolderLabel() {
+      return folders.find((item) => item.key === currentFolderKey)?.label || currentFolderKey;
+    }
+
     function renderFolderButtons() {
       folderBarEl.innerHTML = "";
 
@@ -365,12 +385,14 @@
         stateEl.hidden = false;
         stateEl.textContent = "Gösterilecek dosya yok.";
         countBadgeEl.textContent = "0 dosya";
+        zipBtnEl.disabled = true;
         return;
       }
 
       stateEl.hidden = true;
       rowsEl.hidden = false;
       countBadgeEl.textContent = `${files.length} dosya`;
+      zipBtnEl.disabled = false;
 
       for (const [index, file] of files.entries()) {
         const link = document.createElement("a");
@@ -405,6 +427,7 @@
       stateEl.hidden = false;
       stateEl.textContent = "PDF listesi yükleniyor...";
       countBadgeEl.textContent = "Yükleniyor...";
+      zipBtnEl.disabled = true;
 
       try {
         const response = await fetch(apiUrl, {
@@ -440,7 +463,49 @@
         stateEl.hidden = false;
         stateEl.textContent = "PDF listesi yüklenemedi.";
         countBadgeEl.textContent = "Hata";
+        zipBtnEl.disabled = true;
         console.error(error);
+      }
+    }
+
+    async function downloadCurrentFolderAsZip() {
+      if (!allFiles.length) return;
+
+      zipBtnEl.disabled = true;
+      zipBtnEl.textContent = "ZIP hazırlanıyor...";
+
+      try {
+        const zip = new JSZip();
+
+        for (const file of allFiles) {
+          const pdfUrl = getPagesPdfUrl(file.name);
+          const response = await fetch(pdfUrl);
+
+          if (!response.ok) {
+            throw new Error(`${file.name} indirilemedi.`);
+          }
+
+          const blob = await response.blob();
+          zip.file(file.name, blob);
+        }
+
+        const zipBlob = await zip.generateAsync({ type: "blob" });
+        const downloadUrl = URL.createObjectURL(zipBlob);
+        const link = document.createElement("a");
+        const folderLabel = getCurrentFolderLabel().replace(/\s+/g, "_");
+
+        link.href = downloadUrl;
+        link.download = `${folderLabel}.zip`;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(downloadUrl);
+      } catch (error) {
+        console.error(error);
+        alert("ZIP hazırlanırken hata oluştu.");
+      } finally {
+        zipBtnEl.disabled = !allFiles.length;
+        zipBtnEl.textContent = "ZIP indir";
       }
     }
 
@@ -450,6 +515,8 @@
       renderFolderButtons();
       loadFiles();
     });
+
+    zipBtnEl.addEventListener("click", downloadCurrentFolderAsZip);
 
     updateUrlFolder(currentFolderKey);
     renderFolderButtons();
