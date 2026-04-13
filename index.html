@@ -87,6 +87,7 @@
       color: var(--text);
       font-size: 14px;
       cursor: pointer;
+      transition: background-color 0.2s ease, color 0.2s ease, border-color 0.2s ease;
     }
 
     .folder-btn.active {
@@ -113,11 +114,13 @@
       outline: none;
     }
 
-    .badge,
-    .action-btn {
+    .search:focus {
+      border-color: #cbd5e1;
+    }
+
+    .badge {
       display: inline-flex;
       align-items: center;
-      justify-content: center;
       min-height: 44px;
       padding: 0 14px;
       border-radius: 12px;
@@ -126,17 +129,43 @@
       color: var(--muted);
       font-size: 14px;
       white-space: nowrap;
-      text-decoration: none;
     }
 
     .action-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 10px;
+      min-height: 44px;
+      padding: 0 14px;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      background: #fff;
       color: var(--text);
+      font-size: 14px;
       cursor: pointer;
+      transition: opacity 0.2s ease;
     }
 
     .action-btn:disabled {
-      opacity: 0.6;
+      opacity: 0.75;
       cursor: not-allowed;
+    }
+
+    .zip-spinner {
+      width: 16px;
+      height: 16px;
+      border: 2px solid #d1d5db;
+      border-top-color: #111827;
+      border-radius: 999px;
+      animation: zip-spin 0.8s linear infinite;
+      flex: 0 0 auto;
+    }
+
+    @keyframes zip-spin {
+      to {
+        transform: rotate(360deg);
+      }
     }
 
     .list-head {
@@ -247,10 +276,14 @@
       <div class="toolbar">
         <input id="searchInput" class="search" type="search" placeholder="PDF ara..." autocomplete="off" />
         <div id="countBadge" class="badge">Yükleniyor...</div>
-        <button id="zipBtn" class="action-btn" type="button">ZIPle</button>
+
+        <button id="zipBtn" class="action-btn" type="button" disabled>
+          <span id="zipSpinner" class="zip-spinner" hidden></span>
+          <span id="zipBtnText">ZIP indir</span>
+        </button>
       </div>
 
-      <div class="note">Satıra tıklayınca PDF görüntüleyici açılır.</div>
+      <div class="note">Satıra tıklayınca görüntüleyici açılır.</div>
     </section>
 
     <section class="panel">
@@ -287,6 +320,8 @@
     const countBadgeEl = document.getElementById("countBadge");
     const searchInputEl = document.getElementById("searchInput");
     const zipBtnEl = document.getElementById("zipBtn");
+    const zipBtnTextEl = document.getElementById("zipBtnText");
+    const zipSpinnerEl = document.getElementById("zipSpinner");
 
     let allFiles = [];
 
@@ -333,6 +368,11 @@
       return `docs/${folderKey}`;
     }
 
+    function getRepoBasePath() {
+      const firstSegment = window.location.pathname.split("/").filter(Boolean)[0];
+      return firstSegment ? `/${firstSegment}` : "";
+    }
+
     function updateUrlFolder(folderKey) {
       const url = new URL(window.location.href);
       url.searchParams.set("folder", folderKey);
@@ -344,7 +384,7 @@
         .split("/")
         .map(encodeURIComponent)
         .join("/");
-      return `${window.location.origin}/${repo}/${encodedFolderPath}/${encodeURIComponent(fileName)}`;
+      return `${window.location.origin}${getRepoBasePath()}/${encodedFolderPath}/${encodeURIComponent(fileName)}`;
     }
 
     function buildViewerUrl(fileName) {
@@ -354,6 +394,12 @@
 
     function getCurrentFolderLabel() {
       return folders.find((item) => item.key === currentFolderKey)?.label || currentFolderKey;
+    }
+
+    function setZipLoadingState(isLoading, text = "ZIP indir") {
+      zipBtnEl.disabled = isLoading || !allFiles.length;
+      zipSpinnerEl.hidden = !isLoading;
+      zipBtnTextEl.textContent = text;
     }
 
     function renderFolderButtons() {
@@ -385,14 +431,14 @@
         stateEl.hidden = false;
         stateEl.textContent = "Gösterilecek dosya yok.";
         countBadgeEl.textContent = "0 dosya";
-        zipBtnEl.disabled = true;
+        setZipLoadingState(false, "ZIP indir");
         return;
       }
 
       stateEl.hidden = true;
       rowsEl.hidden = false;
       countBadgeEl.textContent = `${files.length} dosya`;
-      zipBtnEl.disabled = false;
+      setZipLoadingState(false, "ZIP indir");
 
       for (const [index, file] of files.entries()) {
         const link = document.createElement("a");
@@ -471,13 +517,14 @@
     async function downloadCurrentFolderAsZip() {
       if (!allFiles.length) return;
 
-      zipBtnEl.disabled = true;
-      zipBtnEl.textContent = "ZIP hazırlanıyor...";
+      setZipLoadingState(true, `0 / ${allFiles.length}`);
 
       try {
         const zip = new JSZip();
 
-        for (const file of allFiles) {
+        for (const [index, file] of allFiles.entries()) {
+          setZipLoadingState(true, `${index + 1} / ${allFiles.length}`);
+
           const pdfUrl = getPagesPdfUrl(file.name);
           const response = await fetch(pdfUrl);
 
@@ -488,6 +535,8 @@
           const blob = await response.blob();
           zip.file(file.name, blob);
         }
+
+        setZipLoadingState(true, "ZIP oluşturuluyor...");
 
         const zipBlob = await zip.generateAsync({ type: "blob" });
         const downloadUrl = URL.createObjectURL(zipBlob);
@@ -504,8 +553,7 @@
         console.error(error);
         alert("ZIP hazırlanırken hata oluştu.");
       } finally {
-        zipBtnEl.disabled = !allFiles.length;
-        zipBtnEl.textContent = "ZIP indir";
+        setZipLoadingState(false, "ZIP indir");
       }
     }
 
@@ -517,11 +565,11 @@
     });
 
     zipBtnEl.addEventListener("click", downloadCurrentFolderAsZip);
+    searchInputEl.addEventListener("input", applyFilter);
 
     updateUrlFolder(currentFolderKey);
     renderFolderButtons();
     loadFiles();
-    searchInputEl.addEventListener("input", applyFilter);
   </script>
 </body>
 </html>
