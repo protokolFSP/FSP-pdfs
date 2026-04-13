@@ -1,5 +1,4 @@
 <!-- /index.html -->
-
 <!doctype html>
 <html lang="tr">
 <head>
@@ -17,6 +16,8 @@
       --rowA: #ffffff;
       --rowB: #f9fafb;
       --hover: #eef2f7;
+      --active: #111827;
+      --activeText: #ffffff;
       --shadow: 0 10px 30px rgba(0, 0, 0, 0.05);
     }
 
@@ -67,6 +68,33 @@
       font-size: 15px;
     }
 
+    .folder-bar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      margin-bottom: 16px;
+    }
+
+    .folder-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 42px;
+      padding: 0 14px;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #fff;
+      color: var(--text);
+      font-size: 14px;
+      cursor: pointer;
+    }
+
+    .folder-btn.active {
+      background: var(--active);
+      color: var(--activeText);
+      border-color: var(--active);
+    }
+
     .toolbar {
       display: flex;
       gap: 12px;
@@ -99,13 +127,15 @@
     }
 
     .list-head {
+      display: grid;
+      grid-template-columns: 72px 1fr auto;
+      gap: 16px;
+      align-items: center;
       padding: 18px 22px;
       border-bottom: 1px solid var(--line);
-    }
-
-    .list-head h2 {
-      margin: 0;
-      font-size: 20px;
+      font-size: 14px;
+      color: var(--muted);
+      font-weight: 600;
     }
 
     .state {
@@ -119,7 +149,7 @@
 
     .row {
       display: grid;
-      grid-template-columns: 1fr auto;
+      grid-template-columns: 72px 1fr auto;
       gap: 16px;
       align-items: center;
       padding: 16px 22px;
@@ -140,6 +170,12 @@
       background: var(--hover);
     }
 
+    .index {
+      font-size: 14px;
+      color: var(--muted);
+      font-variant-numeric: tabular-nums;
+    }
+
     .name {
       font-size: 16px;
       font-weight: 600;
@@ -151,6 +187,7 @@
       font-size: 14px;
       color: var(--muted);
       white-space: nowrap;
+      font-variant-numeric: tabular-nums;
     }
 
     .note {
@@ -175,9 +212,13 @@
         padding-right: 16px;
       }
 
+      .list-head,
       .row {
-        grid-template-columns: 1fr;
-        gap: 6px;
+        grid-template-columns: 56px 1fr;
+      }
+
+      .size {
+        grid-column: 2;
       }
     }
   </style>
@@ -186,7 +227,9 @@
   <main class="page">
     <section class="panel header">
       <h1 class="title">FSP PDF Arşivi</h1>
-      <p class="subtitle">Varsayılan klasör: <code>docs/düsseldorf/</code></p>
+      <p id="subtitle" class="subtitle">Klasör yükleniyor...</p>
+
+      <div id="folderBar" class="folder-bar"></div>
 
       <div class="toolbar">
         <input id="searchInput" class="search" type="search" placeholder="PDF ara..." autocomplete="off" />
@@ -200,7 +243,9 @@
 
     <section class="panel">
       <div class="list-head">
-        <h2>Dosyalar</h2>
+        <div>No</div>
+        <div>Dosya</div>
+        <div>Boyut</div>
       </div>
 
       <div id="state" class="state">PDF listesi yükleniyor...</div>
@@ -212,13 +257,24 @@
     const owner = "protokolFSP";
     const repo = "FSP-pdfs";
     const branch = "main";
-    const folderPath = "docs/düsseldorf";
 
+    const folders = [
+      { key: "düsseldorf", label: "Düsseldorf" },
+      { key: "stuttgart", label: "Stuttgart" },
+      { key: "hessen", label: "Hessen" },
+      { key: "bayern", label: "Bayern" }
+    ];
+
+    const defaultFolderKey = "düsseldorf";
+
+    const folderBarEl = document.getElementById("folderBar");
+    const subtitleEl = document.getElementById("subtitle");
     const stateEl = document.getElementById("state");
     const rowsEl = document.getElementById("rows");
     const countBadgeEl = document.getElementById("countBadge");
     const searchInputEl = document.getElementById("searchInput");
 
+    let currentFolderKey = defaultFolderKey;
     let allFiles = [];
 
     function escapeHtml(value) {
@@ -253,9 +309,38 @@
       return `${value.toFixed(precision)} ${units[unitIndex]}`;
     }
 
+    function getFolderPath(folderKey) {
+      return `docs/${folderKey}`;
+    }
+
+    function getCurrentFolderLabel() {
+      const folder = folders.find((item) => item.key === currentFolderKey);
+      return folder ? folder.label : currentFolderKey;
+    }
+
     function buildViewerUrl(fileName) {
-      const encodedPath = `${folderPath}/${fileName}`;
-      return `viewer.html?file=${encodeURIComponent(encodedPath)}`;
+      const encodedPath = `${getFolderPath(currentFolderKey)}/${fileName}`;
+      return `viewer.html?file=${encodeURIComponent(encodedPath)}&folder=${encodeURIComponent(currentFolderKey)}`;
+    }
+
+    function renderFolderButtons() {
+      folderBarEl.innerHTML = "";
+
+      for (const folder of folders) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "folder-btn";
+        button.textContent = folder.label;
+        button.classList.toggle("active", folder.key === currentFolderKey);
+        button.addEventListener("click", () => {
+          if (folder.key === currentFolderKey) return;
+          currentFolderKey = folder.key;
+          searchInputEl.value = "";
+          renderFolderButtons();
+          loadFiles();
+        });
+        folderBarEl.appendChild(button);
+      }
     }
 
     function render(files) {
@@ -273,12 +358,13 @@
       rowsEl.hidden = false;
       countBadgeEl.textContent = `${files.length} dosya`;
 
-      for (const file of files) {
+      for (const [index, file] of files.entries()) {
         const link = document.createElement("a");
         link.className = "row";
         link.href = buildViewerUrl(file.name);
 
         link.innerHTML = `
+          <div class="index">${index + 1}</div>
           <div class="name">${escapeHtml(formatName(file.name))}</div>
           <div class="size">${escapeHtml(formatSize(file.size))}</div>
         `;
@@ -297,7 +383,14 @@
     }
 
     async function loadFiles() {
+      const folderPath = getFolderPath(currentFolderKey);
       const apiUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${encodeURIComponent(folderPath).replace(/%2F/g, "/")}?ref=${encodeURIComponent(branch)}`;
+
+      subtitleEl.innerHTML = `Varsayılan klasör: <code>${escapeHtml(getFolderPath(defaultFolderKey))}</code> · Aktif klasör: <code>${escapeHtml(folderPath)}</code>`;
+      rowsEl.hidden = true;
+      stateEl.hidden = false;
+      stateEl.textContent = "PDF listesi yükleniyor...";
+      countBadgeEl.textContent = "Yükleniyor...";
 
       try {
         const response = await fetch(apiUrl, {
@@ -316,8 +409,9 @@
           .filter((item) => item.type === "file" && /\.pdf$/i.test(item.name))
           .sort((a, b) => a.name.localeCompare(b.name, "tr"));
 
-        render(allFiles);
+        applyFilter();
       } catch (error) {
+        allFiles = [];
         rowsEl.hidden = true;
         stateEl.hidden = false;
         stateEl.textContent = "PDF listesi yüklenemedi.";
@@ -327,6 +421,7 @@
     }
 
     searchInputEl.addEventListener("input", applyFilter);
+    renderFolderButtons();
     loadFiles();
   </script>
 </body>
