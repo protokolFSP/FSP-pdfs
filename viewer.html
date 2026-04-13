@@ -1,4 +1,3 @@
-
 <!-- /viewer.html -->
 <!doctype html>
 <html lang="tr">
@@ -104,7 +103,7 @@
   <section class="topbar">
     <h1 id="title" class="title">PDF yükleniyor...</h1>
     <div class="actions">
-      <a id="backBtn" class="btn" href="./">Listeye dön</a>
+      <a id="backBtn" class="btn" href="./?folder=d%C3%BCsseldorf">Listeye dön</a>
     </div>
   </section>
 
@@ -118,33 +117,32 @@
       return new URLSearchParams(window.location.search).get(name);
     }
 
-    function formatTitle(path) {
-      const fileName = path.split("/").pop() || "PDF";
-      return fileName
+    function formatTitle(fileName) {
+      return (fileName || "PDF")
         .replace(/\.pdf$/i, "")
         .replace(/[_-]+/g, " ")
         .replace(/\s+/g, " ")
         .trim();
     }
 
-    const file = getParam("file");
-    const folder = getParam("folder");
+    const pdf = getParam("pdf");
+    const name = getParam("name");
+    const folder = getParam("folder") || "düsseldorf";
+
     const titleEl = document.getElementById("title");
     const backBtn = document.getElementById("backBtn");
     const pdfViewer = document.getElementById("pdfViewer");
     const errorBox = document.getElementById("errorBox");
 
-    if (!file) {
+    backBtn.href = `./?folder=${encodeURIComponent(folder)}`;
+
+    if (!pdf) {
       titleEl.textContent = "PDF yolu bulunamadı.";
       pdfViewer.hidden = true;
       errorBox.hidden = false;
     } else {
-      titleEl.textContent = formatTitle(file);
-      pdfViewer.src = `https://mozilla.github.io/pdf.js/web/viewer.html?file=${encodeURIComponent(file)}`;
-
-      if (folder) {
-        backBtn.href = `./?folder=${encodeURIComponent(folder)}`;
-      }
+      titleEl.textContent = formatTitle(name);
+      pdfViewer.src = `https://mozilla.github.io/pdf.js/web/viewer.html?file=${encodeURIComponent(pdf)}`;
     }
   </script>
 </body>
