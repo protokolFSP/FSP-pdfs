@@ -236,9 +236,7 @@
         <div id="countBadge" class="badge">Yükleniyor...</div>
       </div>
 
-      <div class="note">
-        Satıra tıklayınca PDF görüntüleyici açılır.
-      </div>
+      <div class="note">Satıra tıklayınca PDF görüntüleyici açılır.</div>
     </section>
 
     <section class="panel">
@@ -274,7 +272,7 @@
     const countBadgeEl = document.getElementById("countBadge");
     const searchInputEl = document.getElementById("searchInput");
 
-    let currentFolderKey = defaultFolderKey;
+    let currentFolderKey = new URLSearchParams(window.location.search).get("folder") || defaultFolderKey;
     let allFiles = [];
 
     function escapeHtml(value) {
@@ -311,11 +309,6 @@
 
     function getFolderPath(folderKey) {
       return `docs/${folderKey}`;
-    }
-
-    function getCurrentFolderLabel() {
-      const folder = folders.find((item) => item.key === currentFolderKey);
-      return folder ? folder.label : currentFolderKey;
     }
 
     function buildViewerUrl(fileName) {
@@ -394,9 +387,7 @@
 
       try {
         const response = await fetch(apiUrl, {
-          headers: {
-            Accept: "application/vnd.github+json"
-          }
+          headers: { Accept: "application/vnd.github+json" }
         });
 
         if (!response.ok) {
