@@ -1,0 +1,158 @@
+<!-- /viewer.html -->
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>PDF Görüntüleyici</title>
+  <style>
+    :root {
+      --bg: #f6f7f9;
+      --panel: #ffffff;
+      --text: #111827;
+      --muted: #6b7280;
+      --line: #e5e7eb;
+      --shadow: 0 10px 30px rgba(0, 0, 0, 0.05);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    body {
+      display: flex;
+      flex-direction: column;
+      padding: 20px;
+      gap: 16px;
+    }
+
+    .topbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: center;
+      justify-content: space-between;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      box-shadow: var(--shadow);
+      padding: 16px 18px;
+    }
+
+    .title {
+      margin: 0;
+      font-size: 18px;
+      line-height: 1.4;
+      word-break: break-word;
+    }
+
+    .actions {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 42px;
+      padding: 0 14px;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--text);
+      text-decoration: none;
+      font-size: 14px;
+    }
+
+    .viewer {
+      flex: 1;
+      min-height: 0;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    iframe,
+    object {
+      width: 100%;
+      height: calc(100vh - 120px);
+      border: 0;
+      display: block;
+      background: #eef2f7;
+    }
+
+    .fallback {
+      padding: 24px;
+      color: var(--muted);
+    }
+  </style>
+</head>
+<body>
+  <section class="topbar">
+    <h1 id="title" class="title">PDF yükleniyor...</h1>
+    <div class="actions">
+      <a class="btn" href="./">Listeye dön</a>
+      <a id="openBtn" class="btn" href="#" target="_blank" rel="noopener">Yeni sekmede aç</a>
+    </div>
+  </section>
+
+  <section class="viewer">
+    <object id="pdfObject" data="" type="application/pdf">
+      <iframe id="pdfFrame" title="PDF Görüntüleyici"></iframe>
+      <div class="fallback">
+        PDF görüntülenemedi.
+      </div>
+    </object>
+  </section>
+
+  <script>
+    function escapeHtml(value) {
+      return String(value)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#39;");
+    }
+
+    function getFileParam() {
+      const params = new URLSearchParams(window.location.search);
+      return params.get("file");
+    }
+
+    function formatTitle(path) {
+      const fileName = path.split("/").pop() || "PDF";
+      return fileName.replace(/\.pdf$/i, "").replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
+    }
+
+    const file = getFileParam();
+    const titleEl = document.getElementById("title");
+    const openBtn = document.getElementById("openBtn");
+    const pdfObject = document.getElementById("pdfObject");
+    const pdfFrame = document.getElementById("pdfFrame");
+
+    if (!file) {
+      titleEl.textContent = "PDF yolu bulunamadı.";
+      openBtn.style.display = "none";
+    } else {
+      titleEl.textContent = formatTitle(file);
+      openBtn.href = file;
+      pdfObject.data = file;
+      pdfFrame.src = file;
+    }
+  </script>
+</body>
+</html>
