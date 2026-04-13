@@ -1,1 +1,466 @@
+<!-- /index.html -->
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>FSP PDFs</title>
+  <meta name="description" content="FSP PDF arşivi" />
+  <style>
+    :root {
+      --bg: #f7f7f8;
+      --panel: #ffffff;
+      --text: #111827;
+      --muted: #6b7280;
+      --line: #e5e7eb;
+      --accent: #111827;
+      --accent-2: #374151;
+      --shadow: 0 10px 30px rgba(0, 0, 0, 0.06);
+      --radius: 16px;
+    }
 
+    * {
+      box-sizing: border-box;
+    }
+
+    html, body {
+      margin: 0;
+      padding: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    a {
+      color: inherit;
+      text-decoration: none;
+    }
+
+    .page {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 24px;
+    }
+
+    .header {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      box-shadow: var(--shadow);
+      padding: 24px;
+      margin-bottom: 20px;
+    }
+
+    .title {
+      margin: 0 0 8px;
+      font-size: 32px;
+      line-height: 1.1;
+      letter-spacing: -0.02em;
+    }
+
+    .subtitle {
+      margin: 0;
+      color: var(--muted);
+      font-size: 15px;
+    }
+
+    .toolbar {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+      flex-wrap: wrap;
+      margin-top: 18px;
+    }
+
+    .search {
+      flex: 1 1 320px;
+      min-width: 220px;
+      border: 1px solid var(--line);
+      background: #fff;
+      border-radius: 12px;
+      padding: 12px 14px;
+      font-size: 15px;
+      outline: none;
+    }
+
+    .search:focus {
+      border-color: #c7cdd6;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      min-height: 44px;
+      padding: 0 14px;
+      border-radius: 12px;
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--muted);
+      font-size: 14px;
+      white-space: nowrap;
+    }
+
+    .layout {
+      display: grid;
+      grid-template-columns: 380px 1fr;
+      gap: 20px;
+    }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 24px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+      min-height: 70vh;
+    }
+
+    .list {
+      padding: 14px;
+    }
+
+    .list-head,
+    .preview-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 18px 20px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .list-head h2,
+    .preview-head h2 {
+      margin: 0;
+      font-size: 18px;
+    }
+
+    .items {
+      display: grid;
+      gap: 10px;
+    }
+
+    .item {
+      width: 100%;
+      text-align: left;
+      border: 1px solid var(--line);
+      background: #fff;
+      border-radius: 16px;
+      padding: 14px;
+      cursor: pointer;
+      transition: transform 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+    }
+
+    .item:hover {
+      transform: translateY(-1px);
+      border-color: #d1d5db;
+      box-shadow: 0 8px 20px rgba(0, 0, 0, 0.04);
+    }
+
+    .item.active {
+      border-color: #111827;
+      box-shadow: 0 10px 24px rgba(17, 24, 39, 0.08);
+    }
+
+    .item-title {
+      font-size: 15px;
+      font-weight: 700;
+      line-height: 1.4;
+      word-break: break-word;
+    }
+
+    .item-meta {
+      margin-top: 8px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    .empty,
+    .loading,
+    .error {
+      padding: 18px;
+      border: 1px dashed var(--line);
+      border-radius: 16px;
+      color: var(--muted);
+      background: #fff;
+    }
+
+    .preview {
+      display: flex;
+      flex-direction: column;
+      min-height: 70vh;
+    }
+
+    .preview-toolbar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 40px;
+      padding: 0 14px;
+      border-radius: 10px;
+      border: 1px solid var(--line);
+      background: #fff;
+      font-size: 14px;
+      color: var(--accent);
+    }
+
+    .btn.primary {
+      background: var(--accent);
+      color: #fff;
+      border-color: var(--accent);
+    }
+
+    .preview-frame-wrap {
+      flex: 1;
+      min-height: 60vh;
+      background: #eef1f4;
+    }
+
+    .preview-frame {
+      width: 100%;
+      height: 100%;
+      min-height: 70vh;
+      border: 0;
+      display: block;
+      background: #eef1f4;
+    }
+
+    .preview-placeholder {
+      display: grid;
+      place-items: center;
+      min-height: 70vh;
+      padding: 24px;
+      color: var(--muted);
+      text-align: center;
+    }
+
+    .footer-note {
+      margin-top: 14px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    @media (max-width: 980px) {
+      .layout {
+        grid-template-columns: 1fr;
+      }
+
+      .panel {
+        min-height: auto;
+      }
+
+      .preview-frame,
+      .preview-placeholder {
+        min-height: 65vh;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <section class="header">
+      <h1 class="title">FSP PDF Arşivi</h1>
+      <p class="subtitle">PDF dosyaları <code>docs/düsseldorf/</code> klasöründen otomatik listelenir.</p>
+
+      <div class="toolbar">
+        <input id="searchInput" class="search" type="search" placeholder="PDF ara..." autocomplete="off" />
+        <div id="countBadge" class="badge">Yükleniyor...</div>
+      </div>
+
+      <div class="footer-note">
+        Yeni PDF eklemek için sadece ilgili klasöre dosya yüklemen yeterli.
+      </div>
+    </section>
+
+    <section class="layout">
+      <aside class="panel">
+        <div class="list-head">
+          <h2>Dosyalar</h2>
+        </div>
+        <div class="list">
+          <div id="listState" class="loading">PDF listesi yükleniyor...</div>
+          <div id="items" class="items" hidden></div>
+        </div>
+      </aside>
+
+      <section class="panel preview">
+        <div class="preview-head">
+          <h2 id="previewTitle">Önizleme</h2>
+          <div class="preview-toolbar">
+            <a id="openBtn" class="btn primary" href="#" target="_blank" rel="noopener" hidden>Aç</a>
+            <a id="downloadBtn" class="btn" href="#" download hidden>İndir</a>
+          </div>
+        </div>
+
+        <div class="preview-frame-wrap" id="previewWrap">
+          <div id="previewPlaceholder" class="preview-placeholder">
+            Soldan bir PDF seç.
+          </div>
+          <iframe id="previewFrame" class="preview-frame" title="PDF Önizleme" hidden></iframe>
+        </div>
+      </section>
+    </section>
+  </main>
+
+  <script>
+    const owner = "protokolFSP";
+    const repo = "FSP-pdfs";
+    const branch = "main";
+    const folderPath = "docs/düsseldorf";
+
+    const apiUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${encodeURIComponent(folderPath).replace(/%2F/g, "/")}?ref=${encodeURIComponent(branch)}`;
+    const rawBase = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${encodeURIComponent(folderPath).replace(/%2F/g, "/")}/`;
+
+    const stateEl = document.getElementById("listState");
+    const itemsEl = document.getElementById("items");
+    const countBadgeEl = document.getElementById("countBadge");
+    const searchInputEl = document.getElementById("searchInput");
+    const previewTitleEl = document.getElementById("previewTitle");
+    const previewFrameEl = document.getElementById("previewFrame");
+    const previewPlaceholderEl = document.getElementById("previewPlaceholder");
+    const openBtnEl = document.getElementById("openBtn");
+    const downloadBtnEl = document.getElementById("downloadBtn");
+
+    let allFiles = [];
+    let filteredFiles = [];
+    let selectedPath = "";
+
+    function formatName(filename) {
+      const name = filename.replace(/\.pdf$/i, "");
+      return name.replace(/[_-]+/g, " ").replace(/\s+/g, " ").trim();
+    }
+
+    function formatSize(bytes) {
+      if (!Number.isFinite(bytes)) return "";
+      const units = ["B", "KB", "MB", "GB"];
+      let value = bytes;
+      let unitIndex = 0;
+      while (value >= 1024 && unitIndex < units.length - 1) {
+        value /= 1024;
+        unitIndex += 1;
+      }
+      const precision = value >= 100 || unitIndex === 0 ? 0 : 1;
+      return `${value.toFixed(precision)} ${units[unitIndex]}`;
+    }
+
+    function buildRawUrl(fileName) {
+      return rawBase + encodeURIComponent(fileName);
+    }
+
+    function setSelected(file) {
+      selectedPath = file.path;
+
+      const rawUrl = buildRawUrl(file.name);
+      previewTitleEl.textContent = formatName(file.name);
+      previewFrameEl.src = rawUrl;
+      previewFrameEl.hidden = false;
+      previewPlaceholderEl.hidden = true;
+
+      openBtnEl.href = rawUrl;
+      openBtnEl.hidden = false;
+
+      downloadBtnEl.href = rawUrl;
+      downloadBtnEl.download = file.name;
+      downloadBtnEl.hidden = false;
+
+      document.querySelectorAll(".item").forEach((button) => {
+        button.classList.toggle("active", button.dataset.path === selectedPath);
+      });
+    }
+
+    function renderList(files) {
+      itemsEl.innerHTML = "";
+
+      if (!files.length) {
+        itemsEl.hidden = true;
+        stateEl.hidden = false;
+        stateEl.className = "empty";
+        stateEl.textContent = "Gösterilecek PDF bulunamadı.";
+        countBadgeEl.textContent = "0 dosya";
+        return;
+      }
+
+      stateEl.hidden = true;
+      itemsEl.hidden = false;
+      countBadgeEl.textContent = `${files.length} dosya`;
+
+      for (const file of files) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "item";
+        button.dataset.path = file.path;
+        button.innerHTML = `
+          <div class="item-title">${escapeHtml(formatName(file.name))}</div>
+          <div class="item-meta">${escapeHtml(file.name)}${file.size ? ` · ${escapeHtml(formatSize(file.size))}` : ""}</div>
+        `;
+        button.addEventListener("click", () => setSelected(file));
+        itemsEl.appendChild(button);
+      }
+
+      const selectedStillVisible = files.find((file) => file.path === selectedPath);
+      if (selectedStillVisible) {
+        setSelected(selectedStillVisible);
+      } else {
+        setSelected(files[0]);
+      }
+    }
+
+    function escapeHtml(value) {
+      return String(value)
+        .replaceAll("&", "&amp;")
+        .replaceAll("<", "&lt;")
+        .replaceAll(">", "&gt;")
+        .replaceAll('"', "&quot;")
+        .replaceAll("'", "&#39;");
+    }
+
+    function applyFilter() {
+      const query = searchInputEl.value.trim().toLocaleLowerCase("tr");
+      filteredFiles = allFiles.filter((file) => {
+        const haystack = `${file.name} ${formatName(file.name)}`.toLocaleLowerCase("tr");
+        return haystack.includes(query);
+      });
+      renderList(filteredFiles);
+    }
+
+    async function loadFiles() {
+      try {
+        const response = await fetch(apiUrl, {
+          headers: {
+            "Accept": "application/vnd.github+json"
+          }
+        });
+
+        if (!response.ok) {
+          throw new Error(`GitHub API hatası: ${response.status}`);
+        }
+
+        const data = await response.json();
+
+        allFiles = data
+          .filter((item) => item.type === "file" && /\.pdf$/i.test(item.name))
+          .sort((a, b) => a.name.localeCompare(b.name, "tr"));
+
+        filteredFiles = [...allFiles];
+        renderList(filteredFiles);
+      } catch (error) {
+        itemsEl.hidden = true;
+        stateEl.hidden = false;
+        stateEl.className = "error";
+        stateEl.textContent = "PDF listesi yüklenemedi. Klasör yolu ve repo adını kontrol et.";
+        countBadgeEl.textContent = "Hata";
+        console.error(error);
+      }
+    }
+
+    searchInputEl.addEventListener("input", applyFilter);
+    loadFiles();
+  </script>
+</body>
+</html>
