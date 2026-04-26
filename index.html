@@ -72,7 +72,11 @@
       display: flex;
       flex-wrap: wrap;
       gap: 10px;
-      margin-bottom: 16px;
+      margin-bottom: 12px;
+    }
+
+    .folder-bar[hidden] {
+      display: none;
     }
 
     .folder-btn {
@@ -101,6 +105,7 @@
       gap: 12px;
       align-items: center;
       flex-wrap: wrap;
+      margin-top: 6px;
     }
 
     .search {
@@ -238,6 +243,12 @@
       font-size: 13px;
     }
 
+    code {
+      background: #f3f4f6;
+      padding: 2px 6px;
+      border-radius: 8px;
+    }
+
     @media (max-width: 640px) {
       body {
         padding: 16px;
@@ -269,9 +280,10 @@
   <main class="page">
     <section class="panel header">
       <h1 class="title">FSP PDF Arşivi</h1>
-      <p id="subtitle" class="subtitle">Klasör yükleniyor...</p>
+      <p id="subtitle" class="subtitle">Klasörler yükleniyor...</p>
 
       <div id="folderBar" class="folder-bar"></div>
+      <div id="subfolderBar" class="folder-bar" hidden></div>
 
       <div class="toolbar">
         <input id="searchInput" class="search" type="search" placeholder="PDF ara..." autocomplete="off" />
@@ -303,17 +315,10 @@
     const owner = "protokolFSP";
     const repo = "FSP-pdfs";
     const branch = "main";
-
-    const folders = [
-      { key: "düsseldorf", label: "Düsseldorf" },
-      { key: "stuttgart", label: "Stuttgart" },
-      { key: "hessen", label: "Hessen" },
-      { key: "bayern", label: "Bayern" }
-    ];
-
-    const defaultFolderKey = "düsseldorf";
+    const rootDocsPath = "docs";
 
     const folderBarEl = document.getElementById("folderBar");
+    const subfolderBarEl = document.getElementById("subfolderBar");
     const subtitleEl = document.getElementById("subtitle");
     const stateEl = document.getElementById("state");
     const rowsEl = document.getElementById("rows");
@@ -323,14 +328,14 @@
     const zipBtnTextEl = document.getElementById("zipBtnText");
     const zipSpinnerEl = document.getElementById("zipSpinner");
 
+    let topFolders = [];
+    let subfolders = [];
     let allFiles = [];
+    let visibleFiles = [];
+    let currentFolderKey = "";
+    let currentSubfolderKey = "";
 
-    function getFolderFromUrl() {
-      const folder = new URLSearchParams(window.location.search).get("folder");
-      return folders.some((item) => item.key === folder) ? folder : defaultFolderKey;
-    }
-
-    let currentFolderKey = getFolderFromUrl();
+    let loadAbortController = null;
 
     function escapeHtml(value) {
       return String(value)
@@ -364,8 +369,40 @@
       return `${value.toFixed(precision)} ${units[unitIndex]}`;
     }
 
-    function getFolderPath(folderKey) {
-      return `docs/${folderKey}`;
+    function normalizeLabel(value) {
+      return String(value).replace(/\s+/g, " ").trim();
+    }
+
+    function sortByName(list) {
+      return [...list].sort((a, b) => a.name.localeCompare(b.name, "tr"));
+    }
+
+    function buildGithubContentsUrl(path) {
+      const normalizedPath = path
+        .split("/")
+        .map(encodeURIComponent)
+        .join("/")
+        .replace(/%2F/g, "/");
+
+      return `https://api.github.com/repos/${owner}/${repo}/contents/${normalizedPath}?ref=${encodeURIComponent(branch)}`;
+    }
+
+    async function fetchRepoContents(path, signal) {
+      const response = await fetch(buildGithubContentsUrl(path), {
+        signal,
+        headers: { Accept: "application/vnd.github+json" }
+      });
+
+      if (response.status === 404) {
+        return [];
+      }
+
+      if (!response.ok) {
+        throw new Error(`GitHub API hatası: ${response.status}`);
+      }
+
+      const data = await response.json();
+      return Array.isArray(data) ? data : [];
     }
 
     function getRepoBasePath() {
@@ -373,58 +410,127 @@
       return firstSegment ? `/${firstSegment}` : "";
     }
 
-    function updateUrlFolder(folderKey) {
-      const url = new URL(window.location.href);
-      url.searchParams.set("folder", folderKey);
-      window.history.replaceState({}, "", url);
+    function getActiveRelativePath() {
+      const segments = [rootDocsPath, currentFolderKey];
+      if (currentSubfolderKey) {
+        segments.push(currentSubfolderKey);
+      }
+      return segments.join("/");
     }
 
     function getPagesPdfUrl(fileName) {
-      const encodedFolderPath = getFolderPath(currentFolderKey)
+      const encodedFolderPath = getActiveRelativePath()
         .split("/")
         .map(encodeURIComponent)
         .join("/");
+
       return `${window.location.origin}${getRepoBasePath()}/${encodedFolderPath}/${encodeURIComponent(fileName)}`;
     }
 
     function buildViewerUrl(fileName) {
       const pdfUrl = getPagesPdfUrl(fileName);
-      return `viewer.html?pdf=${encodeURIComponent(pdfUrl)}&name=${encodeURIComponent(fileName)}&folder=${encodeURIComponent(currentFolderKey)}`;
+      const url = new URL("viewer.html", window.location.href);
+
+      url.searchParams.set("pdf", pdfUrl);
+      url.searchParams.set("name", fileName);
+      url.searchParams.set("folder", currentFolderKey);
+
+      if (currentSubfolderKey) {
+        url.searchParams.set("subfolder", currentSubfolderKey);
+      }
+
+      return `${url.pathname}${url.search}`;
     }
 
-    function getCurrentFolderLabel() {
-      return folders.find((item) => item.key === currentFolderKey)?.label || currentFolderKey;
+    function getFolderFromUrl() {
+      const params = new URLSearchParams(window.location.search);
+      return {
+        folder: params.get("folder") || "",
+        subfolder: params.get("subfolder") || ""
+      };
+    }
+
+    function updateUrlState(push = false) {
+      const url = new URL(window.location.href);
+      url.searchParams.set("folder", currentFolderKey);
+
+      if (currentSubfolderKey) {
+        url.searchParams.set("subfolder", currentSubfolderKey);
+      } else {
+        url.searchParams.delete("subfolder");
+      }
+
+      if (push) {
+        window.history.pushState({}, "", url);
+      } else {
+        window.history.replaceState({}, "", url);
+      }
     }
 
     function setZipLoadingState(isLoading, text = "ZIP indir") {
-      zipBtnEl.disabled = isLoading || !allFiles.length;
+      zipBtnEl.disabled = isLoading || !visibleFiles.length;
       zipSpinnerEl.hidden = !isLoading;
       zipBtnTextEl.textContent = text;
     }
 
-    function renderFolderButtons() {
+    function renderTopFolders() {
       folderBarEl.innerHTML = "";
 
-      for (const folder of folders) {
+      for (const folder of topFolders) {
         const button = document.createElement("button");
         button.type = "button";
         button.className = "folder-btn";
-        button.textContent = folder.label;
-        button.classList.toggle("active", folder.key === currentFolderKey);
-        button.addEventListener("click", () => {
-          if (folder.key === currentFolderKey) return;
-          currentFolderKey = folder.key;
-          updateUrlFolder(currentFolderKey);
+        button.textContent = normalizeLabel(folder.name);
+        button.classList.toggle("active", folder.name === currentFolderKey);
+
+        button.addEventListener("click", async () => {
+          if (folder.name === currentFolderKey) return;
+          currentFolderKey = folder.name;
+          currentSubfolderKey = "";
           searchInputEl.value = "";
-          renderFolderButtons();
-          loadFiles();
+          updateUrlState(true);
+          renderTopFolders();
+          renderSubfolders();
+          await loadActiveLevel();
         });
+
         folderBarEl.appendChild(button);
+      }
+    }
+
+    function renderSubfolders() {
+      subfolderBarEl.innerHTML = "";
+
+      if (!subfolders.length) {
+        subfolderBarEl.hidden = true;
+        return;
+      }
+
+      subfolderBarEl.hidden = false;
+
+      for (const folder of subfolders) {
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "folder-btn";
+        button.textContent = normalizeLabel(folder.name);
+        button.classList.toggle("active", folder.name === currentSubfolderKey);
+
+        button.addEventListener("click", async () => {
+          if (folder.name === currentSubfolderKey) return;
+          currentSubfolderKey = folder.name;
+          searchInputEl.value = "";
+          updateUrlState(true);
+          renderSubfolders();
+          await loadFilesForCurrentPath();
+        });
+
+        subfolderBarEl.appendChild(button);
       }
     }
 
     function render(files) {
       rowsEl.innerHTML = "";
+      visibleFiles = files;
 
       if (!files.length) {
         rowsEl.hidden = true;
@@ -457,54 +563,139 @@
 
     function applyFilter() {
       const query = searchInputEl.value.trim().toLocaleLowerCase("tr");
+
       const filtered = allFiles.filter((file) => {
         const haystack = `${file.name} ${formatName(file.name)}`.toLocaleLowerCase("tr");
         return haystack.includes(query);
       });
+
       render(filtered);
     }
 
-    async function loadFiles() {
-      const folderPath = getFolderPath(currentFolderKey);
-      const apiUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${encodeURIComponent(folderPath).replace(/%2F/g, "/")}?ref=${encodeURIComponent(branch)}`;
+    function updateSubtitle() {
+      const parts = [`<code>${escapeHtml(`${rootDocsPath}/${currentFolderKey}`)}</code>`];
 
-      subtitleEl.innerHTML = `Varsayılan klasör: <code>${escapeHtml(getFolderPath(defaultFolderKey))}</code> · Aktif klasör: <code>${escapeHtml(folderPath)}</code>`;
+      if (currentSubfolderKey) {
+        parts.push(`<code>${escapeHtml(`${rootDocsPath}/${currentFolderKey}/${currentSubfolderKey}`)}</code>`);
+      }
+
+      subtitleEl.innerHTML = `Aktif yol: ${parts.join(" · ")}`;
+    }
+
+    function setLoadingState(message = "PDF listesi yükleniyor...") {
       rowsEl.hidden = true;
       stateEl.hidden = false;
-      stateEl.textContent = "PDF listesi yükleniyor...";
+      stateEl.textContent = message;
       countBadgeEl.textContent = "Yükleniyor...";
       zipBtnEl.disabled = true;
+    }
+
+    async function loadTopFolders() {
+      const controller = new AbortController();
+      const items = await fetchRepoContents(rootDocsPath, controller.signal);
+
+      topFolders = sortByName(items.filter((item) => item.type === "dir"));
+
+      if (!topFolders.length) {
+        currentFolderKey = "";
+        currentSubfolderKey = "";
+        allFiles = [];
+        visibleFiles = [];
+        folderBarEl.innerHTML = "";
+        subfolderBarEl.innerHTML = "";
+        subfolderBarEl.hidden = true;
+        subtitleEl.textContent = "Klasör bulunamadı.";
+        render([]);
+        return false;
+      }
+
+      const { folder, subfolder } = getFolderFromUrl();
+      const folderExists = topFolders.some((item) => item.name === folder);
+
+      currentFolderKey = folderExists ? folder : topFolders[0].name;
+      currentSubfolderKey = subfolder || "";
+
+      renderTopFolders();
+      updateUrlState(false);
+      return true;
+    }
+
+    async function loadActiveLevel() {
+      if (!currentFolderKey) {
+        render([]);
+        return;
+      }
+
+      if (loadAbortController) {
+        loadAbortController.abort();
+      }
+
+      loadAbortController = new AbortController();
+      const { signal } = loadAbortController;
+
+      setLoadingState("Klasör içeriği yükleniyor...");
+      updateSubtitle();
 
       try {
-        const response = await fetch(apiUrl, {
-          headers: { Accept: "application/vnd.github+json" }
-        });
+        const activeItems = await fetchRepoContents(`${rootDocsPath}/${currentFolderKey}`, signal);
 
-        if (response.status === 404) {
-          allFiles = [];
-          render([]);
-          return;
+        subfolders = sortByName(activeItems.filter((item) => item.type === "dir"));
+        renderSubfolders();
+
+        if (!subfolders.length) {
+          currentSubfolderKey = "";
+          updateUrlState(false);
+        } else {
+          const hasSelectedSubfolder = subfolders.some((item) => item.name === currentSubfolderKey);
+          currentSubfolderKey = hasSelectedSubfolder ? currentSubfolderKey : subfolders[0].name;
+          renderSubfolders();
+          updateUrlState(false);
         }
 
-        if (!response.ok) {
-          throw new Error(`GitHub API hatası: ${response.status}`);
+        await loadFilesForCurrentPath(signal, activeItems);
+      } catch (error) {
+        if (error.name === "AbortError") return;
+
+        allFiles = [];
+        visibleFiles = [];
+        rowsEl.hidden = true;
+        stateEl.hidden = false;
+        stateEl.textContent = "Klasör içeriği yüklenemedi.";
+        countBadgeEl.textContent = "Hata";
+        zipBtnEl.disabled = true;
+        console.error(error);
+      }
+    }
+
+    async function loadFilesForCurrentPath(signalFromParent = null, parentItems = null) {
+      const signal = signalFromParent || loadAbortController?.signal;
+
+      try {
+        updateSubtitle();
+
+        let items = [];
+
+        if (currentSubfolderKey) {
+          setLoadingState("Alt klasör PDF listesi yükleniyor...");
+          items = await fetchRepoContents(`${rootDocsPath}/${currentFolderKey}/${currentSubfolderKey}`, signal);
+        } else if (Array.isArray(parentItems)) {
+          setLoadingState("PDF listesi yükleniyor...");
+          items = parentItems;
+        } else {
+          setLoadingState("PDF listesi yükleniyor...");
+          items = await fetchRepoContents(`${rootDocsPath}/${currentFolderKey}`, signal);
         }
 
-        const data = await response.json();
-
-        if (!Array.isArray(data)) {
-          allFiles = [];
-          render([]);
-          return;
-        }
-
-        allFiles = data
-          .filter((item) => item.type === "file" && /\.pdf$/i.test(item.name))
-          .sort((a, b) => a.name.localeCompare(b.name, "tr"));
+        allFiles = sortByName(
+          items.filter((item) => item.type === "file" && /\.pdf$/i.test(item.name))
+        );
 
         applyFilter();
       } catch (error) {
+        if (error.name === "AbortError") return;
+
         allFiles = [];
+        visibleFiles = [];
         rowsEl.hidden = true;
         stateEl.hidden = false;
         stateEl.textContent = "PDF listesi yüklenemedi.";
@@ -515,15 +706,15 @@
     }
 
     async function downloadCurrentFolderAsZip() {
-      if (!allFiles.length) return;
+      if (!visibleFiles.length) return;
 
-      setZipLoadingState(true, `0 / ${allFiles.length}`);
+      setZipLoadingState(true, `0 / ${visibleFiles.length}`);
 
       try {
         const zip = new JSZip();
 
-        for (const [index, file] of allFiles.entries()) {
-          setZipLoadingState(true, `${index + 1} / ${allFiles.length}`);
+        for (const [index, file] of visibleFiles.entries()) {
+          setZipLoadingState(true, `${index + 1} / ${visibleFiles.length}`);
 
           const pdfUrl = getPagesPdfUrl(file.name);
           const response = await fetch(pdfUrl);
@@ -541,14 +732,21 @@
         const zipBlob = await zip.generateAsync({ type: "blob" });
         const downloadUrl = URL.createObjectURL(zipBlob);
         const link = document.createElement("a");
-        const folderLabel = getCurrentFolderLabel().replace(/\s+/g, "_");
+        const nameParts = [currentFolderKey];
+
+        if (currentSubfolderKey) {
+          nameParts.push(currentSubfolderKey);
+        }
 
         link.href = downloadUrl;
-        link.download = `${folderLabel}.zip`;
+        link.download = `${nameParts.join("_").replace(/\s+/g, "_")}.zip`;
         document.body.appendChild(link);
         link.click();
         link.remove();
-        URL.revokeObjectURL(downloadUrl);
+
+        setTimeout(() => {
+          URL.revokeObjectURL(downloadUrl);
+        }, 1000);
       } catch (error) {
         console.error(error);
         alert("ZIP hazırlanırken hata oluştu.");
@@ -557,19 +755,32 @@
       }
     }
 
-    window.addEventListener("popstate", () => {
-      currentFolderKey = getFolderFromUrl();
+    async function initialize() {
+      setLoadingState("Klasörler yükleniyor...");
+
+      const ok = await loadTopFolders();
+      if (!ok) return;
+
+      await loadActiveLevel();
+    }
+
+    window.addEventListener("popstate", async () => {
+      const { folder, subfolder } = getFolderFromUrl();
+
+      if (folder) {
+        currentFolderKey = folder;
+      }
+
+      currentSubfolderKey = subfolder || "";
       searchInputEl.value = "";
-      renderFolderButtons();
-      loadFiles();
+      renderTopFolders();
+      await loadActiveLevel();
     });
 
     zipBtnEl.addEventListener("click", downloadCurrentFolderAsZip);
     searchInputEl.addEventListener("input", applyFilter);
 
-    updateUrlFolder(currentFolderKey);
-    renderFolderButtons();
-    loadFiles();
+    initialize();
   </script>
 </body>
 </html>
