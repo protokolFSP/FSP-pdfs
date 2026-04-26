@@ -96,6 +96,11 @@
       text-decoration: none;
       font-size: 14px;
       cursor: pointer;
+      transition: background-color 0.15s ease, opacity 0.15s ease;
+    }
+
+    .btn:hover {
+      background: #f8fafc;
     }
 
     button.btn {
@@ -140,6 +145,7 @@
       background: #fff;
       color: var(--muted);
       font-size: 14px;
+      white-space: nowrap;
     }
 
     .viewer-stage {
@@ -278,6 +284,8 @@
     let currentScale = 1;
     let fitWidthScale = 1;
     let renderVersion = 0;
+    let lastViewerWidth = 0;
+    let resizeTimer = null;
 
     function getParam(name) {
       return new URLSearchParams(window.location.search).get(name);
@@ -368,6 +376,10 @@
       pageCountBadge.textContent = pdfDoc ? `${pdfDoc.numPages} sayfa` : "0 sayfa";
     }
 
+    function getViewerWidth() {
+      return Math.round(viewerStageEl.clientWidth || 0);
+    }
+
     async function calculateFitScale() {
       if (!pdfDoc) {
         return 1;
@@ -375,7 +387,7 @@
 
       const firstPage = await pdfDoc.getPage(1);
       const viewport = firstPage.getViewport({ scale: 1 });
-      const stageWidth = viewerStageEl.clientWidth || 900;
+      const stageWidth = getViewerWidth() || 900;
       const horizontalPadding = 32;
       const availableWidth = Math.max(stageWidth - horizontalPadding, 200);
 
@@ -383,15 +395,21 @@
       return fitWidthScale;
     }
 
-    async function renderAllPages() {
+    async function renderAllPages(options = {}) {
+      const { silent = false } = options;
+
       if (!pdfDoc) {
         return;
       }
 
       const currentRenderVersion = ++renderVersion;
-      pagesContainerEl.innerHTML = "";
+      const fragment = document.createDocumentFragment();
+
+      if (!silent) {
+        stateEl.textContent = "Sayfalar hazırlanıyor...";
+      }
+
       viewerStageEl.hidden = false;
-      stateEl.textContent = `Sayfalar hazırlanıyor...`;
 
       for (let pageNumber = 1; pageNumber <= pdfDoc.numPages; pageNumber += 1) {
         if (currentRenderVersion !== renderVersion) {
@@ -400,6 +418,9 @@
 
         const page = await pdfDoc.getPage(pageNumber);
         const viewport = page.getViewport({ scale: currentScale });
+        const outputScale = Math.min(window.devicePixelRatio || 1, 2);
+        const canvasWidth = Math.floor(viewport.width);
+        const canvasHeight = Math.floor(viewport.height);
 
         const wrapper = document.createElement("section");
         wrapper.className = "page-card";
@@ -409,574 +430,51 @@
         label.textContent = `Sayfa ${pageNumber}`;
 
         const canvas = document.createElement("canvas");
-        const context = canvas.getContext("2d");
+        const context = canvas.getContext("2d", { alpha: false });
 
-        canvas.width = Math.floor(viewport.width);
-        canvas.height = Math.floor(viewport.height);
+        canvas.width = Math.floor(canvasWidth * outputScale);
+        canvas.height = Math.floor(canvasHeight * outputScale);
+        canvas.style.width = `${canvasWidth}px`;
+        canvas.style.height = `${canvasHeight}px`;
+
+        context.setTransform(outputScale, 0, 0, outputScale, 0, 0);
 
         wrapper.appendChild(label);
         wrapper.appendChild(canvas);
-        pagesContainerEl.appendChild(wrapper);
+        fragment.appendChild(wrapper);
 
         await page.render({
           canvasContext: context,
           viewport
         }).promise;
 
-        stateEl.textContent = `Sayfalar hazırlanıyor... (${pageNumber} / ${pdfDoc.numPages})`;
+        if (!silent) {
+          stateEl.textContent = `Sayfalar hazırlanıyor... (${pageNumber} / ${pdfDoc.numPages})`;
+        }
       }
 
-      if (currentRenderVersion === renderVersion) {
+      if (currentRenderVersion !== renderVersion) {
+        return;
+      }
+
+      pagesContainerEl.innerHTML = "";
+      pagesContainerEl.appendChild(fragment);
+
+      if (!silent) {
         stateEl.textContent = "";
-        updateZoomBadge();
-        updatePageCountBadge();
-      }
-    }
-
-    async function fitToWidth() {
-      if (!pdfDoc) {
-        return;
       }
 
-      currentScale = await calculateFitScale();
-      await renderAllPages();
-    }
-
-    async function openPdf(pdfUrl) {
-      const loadingTask = pdfjsLib.getDocument({
-        url: pdfUrl,
-        withCredentials: false
-      });
-
-      pdfDoc = await loadingTask.promise;
-      currentScale = await calculateFitScale();
-      updatePageCountBadge();
-      await renderAllPages();
-    }
-
-    function showError(message, pdfUrl = "") {
-      viewerStageEl.hidden = true;
-      stateEl.innerHTML = pdfUrl
-        ? `${escapeHtml(message)} <a href="${escapeHtml(pdfUrl)}" target="_blank" rel="noopener">Yeni sekmede aç</a>`
-        : escapeHtml(message);
-
-      setButtonState(zoomOutBtn, false);
-      setButtonState(zoomInBtn, false);
-      setButtonState(fitBtn, false);
-    }
-
-    async function init() {
-      const pdf = getParam("pdf");
-      const name = getParam("name");
-      const folder = getParam("folder") || "";
-
-      backBtn.href = folder ? `./?folder=${encodeURIComponent(folder)}` : "./";
-
-      if (!pdf || !name || !folder) {
-        titleEl.textContent = "PDF yolu bulunamadı.";
-        metaEl.textContent = "";
-        setNavState(prevBtn, false);
-        setNavState(nextBtn, false);
-        openBtn.href = "#";
-        openBtn.setAttribute("aria-disabled", "true");
-        showError("Geçerli bir PDF bağlantısı yok.");
-        return;
-      }
-
-      const decodedPdf = decodeURIComponent(pdf);
-
-      titleEl.textContent = formatTitle(name);
-      metaEl.innerHTML = `Klasör: <code>${escapeHtml(getFolderPath(folder))}</code>`;
-      openBtn.href = decodedPdf;
-
-      try {
-        await openPdf(decodedPdf);
-      } catch (error) {
-        console.error(error);
-        showError("PDF açılamadı.", decodedPdf);
-      }
-
-      try {
-        const files = await loadFolderFiles(folder);
-        const currentIndex = files.findIndex((file) => file.name === name);
-
-        if (currentIndex === -1) {
-          setNavState(prevBtn, false);
-          setNavState(nextBtn, false);
-          return;
-        }
-
-        metaEl.innerHTML = `Klasör: <code>${escapeHtml(getFolderPath(folder))}</code> · ${currentIndex + 1} / ${files.length}`;
-
-        const prevFile = currentIndex > 0 ? files[currentIndex - 1] : null;
-        const nextFile = currentIndex < files.length - 1 ? files[currentIndex + 1] : null;
-
-        setNavState(
-          prevBtn,
-          Boolean(prevFile),
-          prevFile ? buildViewerUrl(folder, prevFile.name) : "#"
-        );
-
-        setNavState(
-          nextBtn,
-          Boolean(nextFile),
-          nextFile ? buildViewerUrl(folder, nextFile.name) : "#"
-        );
-      } catch (error) {
-        console.error(error);
-        setNavState(prevBtn, false);
-        setNavState(nextBtn, false);
-      }
-    }
-
-    zoomOutBtn.addEventListener("click", async () => {
-      if (!pdfDoc) return;
-      currentScale = Math.max(0.5, currentScale - 0.1);
-      await renderAllPages();
-    });
-
-    zoomInBtn.addEventListener("click", async () => {
-      if (!pdfDoc) return;
-      currentScale = Math.min(4, currentScale + 0.1);
-      await renderAllPages();
-    });
-
-    fitBtn.addEventListener("click", async () => {
-      await fitToWidth();
-    });
-
-    window.addEventListener("resize", async () => {
-      if (!pdfDoc) return;
-      await fitToWidth();
-    });
-
-    init();
-  </script>
-</body>
-</html><!-- /viewer.html -->
-<!doctype html>
-<html lang="tr">
-<head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>PDF Görüntüleyici</title>
-  <style>
-    :root {
-      --bg: #f6f7f9;
-      --panel: #ffffff;
-      --text: #111827;
-      --muted: #6b7280;
-      --line: #e5e7eb;
-      --shadow: 0 10px 30px rgba(0, 0, 0, 0.05);
-    }
-
-    * {
-      box-sizing: border-box;
-    }
-
-    html, body {
-      margin: 0;
-      padding: 0;
-      min-height: 100%;
-      background: var(--bg);
-      color: var(--text);
-      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-    }
-
-    body {
-      padding: 20px;
-    }
-
-    .page {
-      max-width: 1400px;
-      margin: 0 auto;
-      display: flex;
-      flex-direction: column;
-      gap: 16px;
-    }
-
-    .panel {
-      background: var(--panel);
-      border: 1px solid var(--line);
-      border-radius: 20px;
-      box-shadow: var(--shadow);
-      overflow: hidden;
-    }
-
-    .topbar {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 12px;
-      align-items: center;
-      justify-content: space-between;
-      padding: 16px 18px;
-    }
-
-    .title-wrap {
-      min-width: 0;
-      flex: 1 1 360px;
-    }
-
-    .title {
-      margin: 0;
-      font-size: 18px;
-      line-height: 1.4;
-      word-break: break-word;
-    }
-
-    .meta {
-      margin-top: 6px;
-      font-size: 13px;
-      color: var(--muted);
-      word-break: break-all;
-    }
-
-    .actions {
-      display: flex;
-      gap: 10px;
-      flex-wrap: wrap;
-      align-items: center;
-    }
-
-    .btn {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      min-height: 42px;
-      padding: 0 14px;
-      border-radius: 12px;
-      border: 1px solid var(--line);
-      background: #fff;
-      color: var(--text);
-      text-decoration: none;
-      font-size: 14px;
-      cursor: pointer;
-    }
-
-    button.btn {
-      font: inherit;
-    }
-
-    .btn[aria-disabled="true"],
-    .btn:disabled {
-      opacity: 0.5;
-      pointer-events: none;
-      cursor: not-allowed;
-    }
-
-    .viewer-shell {
-      padding: 16px;
-    }
-
-    .toolbar {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 10px;
-      align-items: center;
-      justify-content: space-between;
-      margin-bottom: 14px;
-    }
-
-    .toolbar-left,
-    .toolbar-right {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 10px;
-      align-items: center;
-    }
-
-    .badge {
-      display: inline-flex;
-      align-items: center;
-      min-height: 40px;
-      padding: 0 12px;
-      border: 1px solid var(--line);
-      border-radius: 12px;
-      background: #fff;
-      color: var(--muted);
-      font-size: 14px;
-    }
-
-    .viewer-stage {
-      min-height: 60vh;
-      padding: 16px;
-      border: 1px solid var(--line);
-      border-radius: 16px;
-      background: #eef2f7;
-      overflow: auto;
-    }
-
-    .canvas-wrap {
-      display: flex;
-      justify-content: center;
-    }
-
-    canvas {
-      max-width: 100%;
-      height: auto;
-      display: block;
-      background: #fff;
-      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.08);
-    }
-
-    .state {
-      color: var(--muted);
-      font-size: 14px;
-      padding: 8px 2px;
-    }
-
-    code {
-      background: #f3f4f6;
-      padding: 2px 6px;
-      border-radius: 8px;
-    }
-
-    @media (max-width: 640px) {
-      body {
-        padding: 14px;
-      }
-
-      .viewer-shell {
-        padding: 12px;
-      }
-
-      .viewer-stage {
-        padding: 10px;
-      }
-    }
-  </style>
-</head>
-<body>
-  <main class="page">
-    <section class="panel">
-      <div class="topbar">
-        <div class="title-wrap">
-          <h1 id="title" class="title">PDF yükleniyor...</h1>
-          <div id="meta" class="meta">Dosya bilgisi yükleniyor...</div>
-        </div>
-
-        <div class="actions">
-          <a id="backBtn" class="btn" href="./">Listeye dön</a>
-          <a id="prevBtn" class="btn" href="#" aria-disabled="true">Önceki dosya</a>
-          <a id="nextBtn" class="btn" href="#" aria-disabled="true">Sonraki dosya</a>
-          <a id="openBtn" class="btn" href="#" target="_blank" rel="noopener">Yeni sekmede aç</a>
-        </div>
-      </div>
-    </section>
-
-    <section class="panel">
-      <div class="viewer-shell">
-        <div class="toolbar">
-          <div class="toolbar-left">
-            <button id="zoomOutBtn" class="btn" type="button">−</button>
-            <div id="zoomBadge" class="badge">%100</div>
-            <button id="zoomInBtn" class="btn" type="button">+</button>
-            <button id="fitBtn" class="btn" type="button">Sığdır</button>
-          </div>
-
-          <div class="toolbar-right">
-            <button id="pagePrevBtn" class="btn" type="button">← Sayfa</button>
-            <div id="pageBadge" class="badge">Sayfa 0 / 0</div>
-            <button id="pageNextBtn" class="btn" type="button">Sayfa →</button>
-          </div>
-        </div>
-
-        <div id="state" class="state">PDF hazırlanıyor...</div>
-
-        <div id="viewerStage" class="viewer-stage" hidden>
-          <div class="canvas-wrap">
-            <canvas id="pdfCanvas"></canvas>
-          </div>
-        </div>
-      </div>
-    </section>
-  </main>
-
-  <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@4.4.168/build/pdf.min.mjs" type="module"></script>
-  <script type="module">
-    import * as pdfjsLib from "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.4.168/build/pdf.min.mjs";
-
-    pdfjsLib.GlobalWorkerOptions.workerSrc =
-      "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.4.168/build/pdf.worker.min.mjs";
-
-    const owner = "protokolFSP";
-    const repo = "FSP-pdfs";
-    const branch = "main";
-    const rootDocsPath = "docs";
-
-    const titleEl = document.getElementById("title");
-    const metaEl = document.getElementById("meta");
-    const backBtn = document.getElementById("backBtn");
-    const prevBtn = document.getElementById("prevBtn");
-    const nextBtn = document.getElementById("nextBtn");
-    const openBtn = document.getElementById("openBtn");
-    const zoomOutBtn = document.getElementById("zoomOutBtn");
-    const zoomInBtn = document.getElementById("zoomInBtn");
-    const fitBtn = document.getElementById("fitBtn");
-    const pagePrevBtn = document.getElementById("pagePrevBtn");
-    const pageNextBtn = document.getElementById("pageNextBtn");
-    const zoomBadge = document.getElementById("zoomBadge");
-    const pageBadge = document.getElementById("pageBadge");
-    const stateEl = document.getElementById("state");
-    const viewerStageEl = document.getElementById("viewerStage");
-    const canvasEl = document.getElementById("pdfCanvas");
-
-    let pdfDoc = null;
-    let currentPageNumber = 1;
-    let currentScale = 1;
-    let fitWidthScale = 1;
-    let renderTask = null;
-
-    function getParam(name) {
-      return new URLSearchParams(window.location.search).get(name);
-    }
-
-    function escapeHtml(value) {
-      return String(value)
-        .replaceAll("&", "&amp;")
-        .replaceAll("<", "&lt;")
-        .replaceAll(">", "&gt;")
-        .replaceAll('"', "&quot;")
-        .replaceAll("'", "&#39;");
-    }
-
-    function formatTitle(fileName) {
-      return (fileName || "PDF")
-        .replace(/\.pdf$/i, "")
-        .replace(/[_-]+/g, " ")
-        .replace(/\s+/g, " ")
-        .trim();
-    }
-
-    function getRepoBasePath() {
-      const firstSegment = window.location.pathname.split("/").filter(Boolean)[0];
-      return firstSegment ? `/${firstSegment}` : "";
-    }
-
-    function getFolderPath(folderKey) {
-      return `${rootDocsPath}/${folderKey}`;
-    }
-
-    function getPagesPdfUrl(folderKey, fileName) {
-      const encodedFolderPath = getFolderPath(folderKey)
-        .split("/")
-        .map(encodeURIComponent)
-        .join("/");
-
-      return `${window.location.origin}${getRepoBasePath()}/${encodedFolderPath}/${encodeURIComponent(fileName)}`;
-    }
-
-    function buildViewerUrl(folderKey, fileName) {
-      const pdfUrl = getPagesPdfUrl(folderKey, fileName);
-      const params = new URLSearchParams();
-      params.set("pdf", pdfUrl);
-      params.set("name", fileName);
-      params.set("folder", folderKey);
-      return `viewer.html?${params.toString()}`;
-    }
-
-    function setNavState(element, enabled, href = "#") {
-      element.href = href;
-      element.setAttribute("aria-disabled", enabled ? "false" : "true");
-    }
-
-    function setButtonState(element, enabled) {
-      element.disabled = !enabled;
-      element.setAttribute("aria-disabled", enabled ? "false" : "true");
-    }
-
-    async function loadFolderFiles(folderKey) {
-      const folderPath = getFolderPath(folderKey);
-      const apiUrl = `https://api.github.com/repos/${owner}/${repo}/contents/${encodeURIComponent(folderPath).replace(/%2F/g, "/")}?ref=${encodeURIComponent(branch)}`;
-
-      const response = await fetch(apiUrl, {
-        headers: { Accept: "application/vnd.github+json" }
-      });
-
-      if (!response.ok) {
-        throw new Error(`GitHub API hatası: ${response.status}`);
-      }
-
-      const data = await response.json();
-
-      if (!Array.isArray(data)) {
-        return [];
-      }
-
-      return data
-        .filter((item) => item.type === "file" && /\.pdf$/i.test(item.name))
-        .sort((a, b) => a.name.localeCompare(b.name, "tr"));
-    }
-
-    function updatePageBadge() {
-      const totalPages = pdfDoc ? pdfDoc.numPages : 0;
-      pageBadge.textContent = `Sayfa ${currentPageNumber} / ${totalPages}`;
-      setButtonState(pagePrevBtn, currentPageNumber > 1);
-      setButtonState(pageNextBtn, Boolean(pdfDoc) && currentPageNumber < pdfDoc.numPages);
-    }
-
-    function updateZoomBadge() {
-      zoomBadge.textContent = `%${Math.round(currentScale * 100)}`;
-    }
-
-    async function calculateFitScale(page) {
-      const stageWidth = viewerStageEl.clientWidth || 800;
-      const viewport = page.getViewport({ scale: 1 });
-      const horizontalPadding = 32;
-      const availableWidth = Math.max(stageWidth - horizontalPadding, 200);
-      fitWidthScale = availableWidth / viewport.width;
-      return fitWidthScale;
-    }
-
-    async function renderPage(pageNumber) {
-      if (!pdfDoc) {
-        return;
-      }
-
-      const page = await pdfDoc.getPage(pageNumber);
-      await calculateFitScale(page);
-
-      if (renderTask) {
-        try {
-          renderTask.cancel();
-        } catch (error) {
-          console.error(error);
-        }
-      }
-
-      const viewport = page.getViewport({ scale: currentScale });
-      const context = canvasEl.getContext("2d");
-
-      canvasEl.width = Math.floor(viewport.width);
-      canvasEl.height = Math.floor(viewport.height);
-
-      renderTask = page.render({
-        canvasContext: context,
-        viewport
-      });
-
-      try {
-        await renderTask.promise;
-      } catch (error) {
-        if (error?.name !== "RenderingCancelledException") {
-          throw error;
-        }
-      }
-
-      updatePageBadge();
       updateZoomBadge();
-      viewerStageEl.hidden = false;
-      stateEl.textContent = "";
+      updatePageCountBadge();
     }
 
-    async function fitToWidth() {
+    async function fitToWidth(options = {}) {
       if (!pdfDoc) {
         return;
       }
 
-      const page = await pdfDoc.getPage(currentPageNumber);
-      currentScale = await calculateFitScale(page);
-      await renderPage(currentPageNumber);
+      currentScale = await calculateFitScale();
+      await renderAllPages(options);
     }
 
     async function openPdf(pdfUrl) {
@@ -986,12 +484,14 @@
       });
 
       pdfDoc = await loadingTask.promise;
-      currentPageNumber = 1;
+      updatePageCountBadge();
+      lastViewerWidth = getViewerWidth();
+      currentScale = await calculateFitScale();
+      await renderAllPages({ silent: false });
 
-      const firstPage = await pdfDoc.getPage(1);
-      currentScale = await calculateFitScale(firstPage);
-
-      await renderPage(1);
+      setButtonState(zoomOutBtn, true);
+      setButtonState(zoomInBtn, true);
+      setButtonState(fitBtn, true);
     }
 
     function showError(message, pdfUrl = "") {
@@ -1000,11 +500,28 @@
         ? `${escapeHtml(message)} <a href="${escapeHtml(pdfUrl)}" target="_blank" rel="noopener">Yeni sekmede aç</a>`
         : escapeHtml(message);
 
-      setButtonState(pagePrevBtn, false);
-      setButtonState(pageNextBtn, false);
       setButtonState(zoomOutBtn, false);
       setButtonState(zoomInBtn, false);
       setButtonState(fitBtn, false);
+    }
+
+    async function handleResponsiveRerender() {
+      if (!pdfDoc) {
+        return;
+      }
+
+      const nextWidth = getViewerWidth();
+
+      if (!nextWidth) {
+        return;
+      }
+
+      if (Math.abs(nextWidth - lastViewerWidth) < 24) {
+        return;
+      }
+
+      lastViewerWidth = nextWidth;
+      await fitToWidth({ silent: true });
     }
 
     async function init() {
@@ -1074,34 +591,24 @@
     zoomOutBtn.addEventListener("click", async () => {
       if (!pdfDoc) return;
       currentScale = Math.max(0.5, currentScale - 0.1);
-      await renderPage(currentPageNumber);
+      await renderAllPages({ silent: true });
     });
 
     zoomInBtn.addEventListener("click", async () => {
       if (!pdfDoc) return;
       currentScale = Math.min(4, currentScale + 0.1);
-      await renderPage(currentPageNumber);
+      await renderAllPages({ silent: true });
     });
 
     fitBtn.addEventListener("click", async () => {
-      await fitToWidth();
+      await fitToWidth({ silent: true });
     });
 
-    pagePrevBtn.addEventListener("click", async () => {
-      if (!pdfDoc || currentPageNumber <= 1) return;
-      currentPageNumber -= 1;
-      await renderPage(currentPageNumber);
-    });
-
-    pageNextBtn.addEventListener("click", async () => {
-      if (!pdfDoc || currentPageNumber >= pdfDoc.numPages) return;
-      currentPageNumber += 1;
-      await renderPage(currentPageNumber);
-    });
-
-    window.addEventListener("resize", async () => {
-      if (!pdfDoc) return;
-      await fitToWidth();
+    window.addEventListener("resize", () => {
+      clearTimeout(resizeTimer);
+      resizeTimer = setTimeout(() => {
+        handleResponsiveRerender().catch(console.error);
+      }, 150);
     });
 
     init();
