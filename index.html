@@ -66,17 +66,14 @@
       margin: 0 0 18px;
       color: var(--muted);
       font-size: 15px;
+      word-break: break-word;
     }
 
     .folder-bar {
       display: flex;
       flex-wrap: wrap;
       gap: 10px;
-      margin-bottom: 12px;
-    }
-
-    .folder-bar[hidden] {
-      display: none;
+      margin-bottom: 16px;
     }
 
     .folder-btn {
@@ -105,7 +102,6 @@
       gap: 12px;
       align-items: center;
       flex-wrap: wrap;
-      margin-top: 6px;
     }
 
     .search {
@@ -283,7 +279,6 @@
       <p id="subtitle" class="subtitle">Klasörler yükleniyor...</p>
 
       <div id="folderBar" class="folder-bar"></div>
-      <div id="subfolderBar" class="folder-bar" hidden></div>
 
       <div class="toolbar">
         <input id="searchInput" class="search" type="search" placeholder="PDF ara..." autocomplete="off" />
@@ -318,7 +313,6 @@
     const rootDocsPath = "docs";
 
     const folderBarEl = document.getElementById("folderBar");
-    const subfolderBarEl = document.getElementById("subfolderBar");
     const subtitleEl = document.getElementById("subtitle");
     const stateEl = document.getElementById("state");
     const rowsEl = document.getElementById("rows");
@@ -329,12 +323,9 @@
     const zipSpinnerEl = document.getElementById("zipSpinner");
 
     let topFolders = [];
-    let subfolders = [];
     let allFiles = [];
     let visibleFiles = [];
     let currentFolderKey = "";
-    let currentSubfolderKey = "";
-
     let loadAbortController = null;
 
     function escapeHtml(value) {
@@ -410,16 +401,12 @@
       return firstSegment ? `/${firstSegment}` : "";
     }
 
-    function getActiveRelativePath() {
-      const segments = [rootDocsPath, currentFolderKey];
-      if (currentSubfolderKey) {
-        segments.push(currentSubfolderKey);
-      }
-      return segments.join("/");
+    function getFolderPath(folderKey) {
+      return `${rootDocsPath}/${folderKey}`;
     }
 
     function getPagesPdfUrl(fileName) {
-      const encodedFolderPath = getActiveRelativePath()
+      const encodedFolderPath = getFolderPath(currentFolderKey)
         .split("/")
         .map(encodeURIComponent)
         .join("/");
@@ -429,35 +416,27 @@
 
     function buildViewerUrl(fileName) {
       const pdfUrl = getPagesPdfUrl(fileName);
-      const url = new URL("viewer.html", window.location.href);
+      const params = new URLSearchParams();
 
-      url.searchParams.set("pdf", pdfUrl);
-      url.searchParams.set("name", fileName);
-      url.searchParams.set("folder", currentFolderKey);
+      params.set("pdf", pdfUrl);
+      params.set("name", fileName);
+      params.set("folder", currentFolderKey);
 
-      if (currentSubfolderKey) {
-        url.searchParams.set("subfolder", currentSubfolderKey);
-      }
-
-      return `${url.pathname}${url.search}`;
+      return `viewer.html?${params.toString()}`;
     }
 
     function getFolderFromUrl() {
-      const params = new URLSearchParams(window.location.search);
-      return {
-        folder: params.get("folder") || "",
-        subfolder: params.get("subfolder") || ""
-      };
+      const folder = new URLSearchParams(window.location.search).get("folder") || "";
+      return folder;
     }
 
     function updateUrlState(push = false) {
       const url = new URL(window.location.href);
-      url.searchParams.set("folder", currentFolderKey);
 
-      if (currentSubfolderKey) {
-        url.searchParams.set("subfolder", currentSubfolderKey);
+      if (currentFolderKey) {
+        url.searchParams.set("folder", currentFolderKey);
       } else {
-        url.searchParams.delete("subfolder");
+        url.searchParams.delete("folder");
       }
 
       if (push) {
@@ -473,7 +452,7 @@
       zipBtnTextEl.textContent = text;
     }
 
-    function renderTopFolders() {
+    function renderFolders() {
       folderBarEl.innerHTML = "";
 
       for (const folder of topFolders) {
@@ -486,45 +465,13 @@
         button.addEventListener("click", async () => {
           if (folder.name === currentFolderKey) return;
           currentFolderKey = folder.name;
-          currentSubfolderKey = "";
           searchInputEl.value = "";
           updateUrlState(true);
-          renderTopFolders();
-          renderSubfolders();
-          await loadActiveLevel();
+          renderFolders();
+          await loadFiles();
         });
 
         folderBarEl.appendChild(button);
-      }
-    }
-
-    function renderSubfolders() {
-      subfolderBarEl.innerHTML = "";
-
-      if (!subfolders.length) {
-        subfolderBarEl.hidden = true;
-        return;
-      }
-
-      subfolderBarEl.hidden = false;
-
-      for (const folder of subfolders) {
-        const button = document.createElement("button");
-        button.type = "button";
-        button.className = "folder-btn";
-        button.textContent = normalizeLabel(folder.name);
-        button.classList.toggle("active", folder.name === currentSubfolderKey);
-
-        button.addEventListener("click", async () => {
-          if (folder.name === currentSubfolderKey) return;
-          currentSubfolderKey = folder.name;
-          searchInputEl.value = "";
-          updateUrlState(true);
-          renderSubfolders();
-          await loadFilesForCurrentPath();
-        });
-
-        subfolderBarEl.appendChild(button);
       }
     }
 
@@ -573,13 +520,12 @@
     }
 
     function updateSubtitle() {
-      const parts = [`<code>${escapeHtml(`${rootDocsPath}/${currentFolderKey}`)}</code>`];
-
-      if (currentSubfolderKey) {
-        parts.push(`<code>${escapeHtml(`${rootDocsPath}/${currentFolderKey}/${currentSubfolderKey}`)}</code>`);
+      if (!currentFolderKey) {
+        subtitleEl.textContent = "Klasör bulunamadı.";
+        return;
       }
 
-      subtitleEl.innerHTML = `Aktif yol: ${parts.join(" · ")}`;
+      subtitleEl.innerHTML = `Aktif klasör: <code>${escapeHtml(getFolderPath(currentFolderKey))}</code>`;
     }
 
     function setLoadingState(message = "PDF listesi yükleniyor...") {
@@ -591,36 +537,31 @@
     }
 
     async function loadTopFolders() {
-      const controller = new AbortController();
-      const items = await fetchRepoContents(rootDocsPath, controller.signal);
+      const items = await fetchRepoContents(rootDocsPath);
 
       topFolders = sortByName(items.filter((item) => item.type === "dir"));
 
       if (!topFolders.length) {
         currentFolderKey = "";
-        currentSubfolderKey = "";
         allFiles = [];
         visibleFiles = [];
         folderBarEl.innerHTML = "";
-        subfolderBarEl.innerHTML = "";
-        subfolderBarEl.hidden = true;
         subtitleEl.textContent = "Klasör bulunamadı.";
         render([]);
         return false;
       }
 
-      const { folder, subfolder } = getFolderFromUrl();
-      const folderExists = topFolders.some((item) => item.name === folder);
+      const folderFromUrl = getFolderFromUrl();
+      const folderExists = topFolders.some((item) => item.name === folderFromUrl);
 
-      currentFolderKey = folderExists ? folder : topFolders[0].name;
-      currentSubfolderKey = subfolder || "";
-
-      renderTopFolders();
+      currentFolderKey = folderExists ? folderFromUrl : topFolders[0].name;
+      renderFolders();
       updateUrlState(false);
+      updateSubtitle();
       return true;
     }
 
-    async function loadActiveLevel() {
+    async function loadFiles() {
       if (!currentFolderKey) {
         render([]);
         return;
@@ -633,58 +574,11 @@
       loadAbortController = new AbortController();
       const { signal } = loadAbortController;
 
-      setLoadingState("Klasör içeriği yükleniyor...");
+      setLoadingState("PDF listesi yükleniyor...");
       updateSubtitle();
 
       try {
-        const activeItems = await fetchRepoContents(`${rootDocsPath}/${currentFolderKey}`, signal);
-
-        subfolders = sortByName(activeItems.filter((item) => item.type === "dir"));
-        renderSubfolders();
-
-        if (!subfolders.length) {
-          currentSubfolderKey = "";
-          updateUrlState(false);
-        } else {
-          const hasSelectedSubfolder = subfolders.some((item) => item.name === currentSubfolderKey);
-          currentSubfolderKey = hasSelectedSubfolder ? currentSubfolderKey : subfolders[0].name;
-          renderSubfolders();
-          updateUrlState(false);
-        }
-
-        await loadFilesForCurrentPath(signal, activeItems);
-      } catch (error) {
-        if (error.name === "AbortError") return;
-
-        allFiles = [];
-        visibleFiles = [];
-        rowsEl.hidden = true;
-        stateEl.hidden = false;
-        stateEl.textContent = "Klasör içeriği yüklenemedi.";
-        countBadgeEl.textContent = "Hata";
-        zipBtnEl.disabled = true;
-        console.error(error);
-      }
-    }
-
-    async function loadFilesForCurrentPath(signalFromParent = null, parentItems = null) {
-      const signal = signalFromParent || loadAbortController?.signal;
-
-      try {
-        updateSubtitle();
-
-        let items = [];
-
-        if (currentSubfolderKey) {
-          setLoadingState("Alt klasör PDF listesi yükleniyor...");
-          items = await fetchRepoContents(`${rootDocsPath}/${currentFolderKey}/${currentSubfolderKey}`, signal);
-        } else if (Array.isArray(parentItems)) {
-          setLoadingState("PDF listesi yükleniyor...");
-          items = parentItems;
-        } else {
-          setLoadingState("PDF listesi yükleniyor...");
-          items = await fetchRepoContents(`${rootDocsPath}/${currentFolderKey}`, signal);
-        }
+        const items = await fetchRepoContents(getFolderPath(currentFolderKey), signal);
 
         allFiles = sortByName(
           items.filter((item) => item.type === "file" && /\.pdf$/i.test(item.name))
@@ -692,7 +586,9 @@
 
         applyFilter();
       } catch (error) {
-        if (error.name === "AbortError") return;
+        if (error.name === "AbortError") {
+          return;
+        }
 
         allFiles = [];
         visibleFiles = [];
@@ -732,14 +628,10 @@
         const zipBlob = await zip.generateAsync({ type: "blob" });
         const downloadUrl = URL.createObjectURL(zipBlob);
         const link = document.createElement("a");
-        const nameParts = [currentFolderKey];
-
-        if (currentSubfolderKey) {
-          nameParts.push(currentSubfolderKey);
-        }
+        const safeFolderName = currentFolderKey.replace(/\s+/g, "_");
 
         link.href = downloadUrl;
-        link.download = `${nameParts.join("_").replace(/\s+/g, "_")}.zip`;
+        link.download = `${safeFolderName}.zip`;
         document.body.appendChild(link);
         link.click();
         link.remove();
@@ -758,23 +650,37 @@
     async function initialize() {
       setLoadingState("Klasörler yükleniyor...");
 
-      const ok = await loadTopFolders();
-      if (!ok) return;
-
-      await loadActiveLevel();
+      try {
+        const ok = await loadTopFolders();
+        if (!ok) return;
+        await loadFiles();
+      } catch (error) {
+        allFiles = [];
+        visibleFiles = [];
+        folderBarEl.innerHTML = "";
+        rowsEl.hidden = true;
+        stateEl.hidden = false;
+        stateEl.textContent = "Klasörler yüklenemedi.";
+        countBadgeEl.textContent = "Hata";
+        zipBtnEl.disabled = true;
+        console.error(error);
+      }
     }
 
     window.addEventListener("popstate", async () => {
-      const { folder, subfolder } = getFolderFromUrl();
+      const folderFromUrl = getFolderFromUrl();
 
-      if (folder) {
-        currentFolderKey = folder;
+      if (folderFromUrl && topFolders.some((item) => item.name === folderFromUrl)) {
+        currentFolderKey = folderFromUrl;
+      } else if (topFolders.length) {
+        currentFolderKey = topFolders[0].name;
+      } else {
+        currentFolderKey = "";
       }
 
-      currentSubfolderKey = subfolder || "";
       searchInputEl.value = "";
-      renderTopFolders();
-      await loadActiveLevel();
+      renderFolders();
+      await loadFiles();
     });
 
     zipBtnEl.addEventListener("click", downloadCurrentFolderAsZip);
@@ -784,3 +690,4 @@
   </script>
 </body>
 </html>
+
