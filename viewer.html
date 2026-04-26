@@ -64,6 +64,7 @@
       margin-top: 6px;
       font-size: 13px;
       color: var(--muted);
+      word-break: break-all;
     }
 
     .actions {
@@ -87,7 +88,6 @@
       cursor: pointer;
     }
 
-    .btn:disabled,
     .btn[aria-disabled="true"] {
       opacity: 0.5;
       pointer-events: none;
@@ -116,6 +116,12 @@
       padding: 24px;
       color: var(--muted);
     }
+
+    code {
+      background: #f3f4f6;
+      padding: 2px 6px;
+      border-radius: 8px;
+    }
   </style>
 </head>
 <body>
@@ -126,9 +132,10 @@
     </div>
 
     <div class="actions">
-      <a id="backBtn" class="btn" href="./?folder=d%C3%BCsseldorf">Listeye dön</a>
+      <a id="backBtn" class="btn" href="./">Listeye dön</a>
       <a id="prevBtn" class="btn" href="#" aria-disabled="true">Önceki</a>
       <a id="nextBtn" class="btn" href="#" aria-disabled="true">Sonraki</a>
+      <a id="openBtn" class="btn" href="#" target="_blank" rel="noopener">Yeni sekmede aç</a>
     </div>
   </section>
 
@@ -141,6 +148,7 @@
     const owner = "protokolFSP";
     const repo = "FSP-pdfs";
     const branch = "main";
+    const rootDocsPath = "docs";
 
     function getParam(name) {
       return new URLSearchParams(window.location.search).get(name);
@@ -169,7 +177,7 @@
     }
 
     function getFolderPath(folderKey) {
-      return `docs/${folderKey}`;
+      return `${rootDocsPath}/${folderKey}`;
     }
 
     function getPagesPdfUrl(folderKey, fileName) {
@@ -177,12 +185,19 @@
         .split("/")
         .map(encodeURIComponent)
         .join("/");
+
       return `${window.location.origin}${getRepoBasePath()}/${encodedFolderPath}/${encodeURIComponent(fileName)}`;
     }
 
     function buildViewerUrl(folderKey, fileName) {
       const pdfUrl = getPagesPdfUrl(folderKey, fileName);
-      return `viewer.html?pdf=${encodeURIComponent(pdfUrl)}&name=${encodeURIComponent(fileName)}&folder=${encodeURIComponent(folderKey)}`;
+      const params = new URLSearchParams();
+
+      params.set("pdf", pdfUrl);
+      params.set("name", fileName);
+      params.set("folder", folderKey);
+
+      return `viewer.html?${params.toString()}`;
     }
 
     function setNavState(element, enabled, href = "#") {
@@ -210,65 +225,94 @@
         .sort((a, b) => a.name.localeCompare(b.name, "tr"));
     }
 
+    async function verifyPdf(url) {
+      const response = await fetch(url, { method: "HEAD" });
+
+      if (!response.ok) {
+        throw new Error(`PDF erişilemiyor: ${response.status}`);
+      }
+    }
+
     const pdf = getParam("pdf");
     const name = getParam("name");
-    const folder = getParam("folder") || "düsseldorf";
+    const folder = getParam("folder") || "";
 
     const titleEl = document.getElementById("title");
     const metaEl = document.getElementById("meta");
     const backBtn = document.getElementById("backBtn");
     const prevBtn = document.getElementById("prevBtn");
     const nextBtn = document.getElementById("nextBtn");
+    const openBtn = document.getElementById("openBtn");
     const pdfViewer = document.getElementById("pdfViewer");
     const errorBox = document.getElementById("errorBox");
 
-    backBtn.href = `./?folder=${encodeURIComponent(folder)}`;
+    backBtn.href = folder ? `./?folder=${encodeURIComponent(folder)}` : "./";
 
-    if (!pdf || !name) {
-      titleEl.textContent = "PDF yolu bulunamadı.";
-      metaEl.textContent = "";
-      pdfViewer.hidden = true;
-      errorBox.hidden = false;
-      setNavState(prevBtn, false);
-      setNavState(nextBtn, false);
-    } else {
+    async function init() {
+      if (!pdf || !name || !folder) {
+        titleEl.textContent = "PDF yolu bulunamadı.";
+        metaEl.textContent = "";
+        pdfViewer.hidden = true;
+        errorBox.hidden = false;
+        setNavState(prevBtn, false);
+        setNavState(nextBtn, false);
+        openBtn.href = "#";
+        openBtn.setAttribute("aria-disabled", "true");
+        return;
+      }
+
+      const decodedPdf = decodeURIComponent(pdf);
+
       titleEl.textContent = formatTitle(name);
       metaEl.innerHTML = `Klasör: <code>${escapeHtml(getFolderPath(folder))}</code>`;
-      pdfViewer.src = `https://mozilla.github.io/pdf.js/web/viewer.html?file=${encodeURIComponent(pdf)}`;
+      openBtn.href = decodedPdf;
 
-      loadFolderFiles(folder)
-        .then((files) => {
-          const currentIndex = files.findIndex((file) => file.name === name);
+      try {
+        await verifyPdf(decodedPdf);
+        pdfViewer.src = decodedPdf;
+        pdfViewer.hidden = false;
+        errorBox.hidden = true;
+      } catch (error) {
+        console.error(error);
+        pdfViewer.hidden = true;
+        errorBox.hidden = false;
+        errorBox.innerHTML = `PDF açılamadı. <a href="${escapeHtml(decodedPdf)}" target="_blank" rel="noopener">Yeni sekmede aç</a>`;
+      }
 
-          if (currentIndex === -1) {
-            metaEl.innerHTML = `Klasör: <code>${escapeHtml(getFolderPath(folder))}</code>`;
-            setNavState(prevBtn, false);
-            setNavState(nextBtn, false);
-            return;
-          }
+      try {
+        const files = await loadFolderFiles(folder);
+        const currentIndex = files.findIndex((file) => file.name === name);
 
-          metaEl.innerHTML = `Klasör: <code>${escapeHtml(getFolderPath(folder))}</code> · ${currentIndex + 1} / ${files.length}`;
-
-          const prevFile = currentIndex > 0 ? files[currentIndex - 1] : null;
-          const nextFile = currentIndex < files.length - 1 ? files[currentIndex + 1] : null;
-
-          setNavState(
-            prevBtn,
-            Boolean(prevFile),
-            prevFile ? buildViewerUrl(folder, prevFile.name) : "#"
-          );
-
-          setNavState(
-            nextBtn,
-            Boolean(nextFile),
-            nextFile ? buildViewerUrl(folder, nextFile.name) : "#"
-          );
-        })
-        .catch(() => {
+        if (currentIndex === -1) {
           setNavState(prevBtn, false);
           setNavState(nextBtn, false);
-        });
+          return;
+        }
+
+        metaEl.innerHTML = `Klasör: <code>${escapeHtml(getFolderPath(folder))}</code> · ${currentIndex + 1} / ${files.length}`;
+
+        const prevFile = currentIndex > 0 ? files[currentIndex - 1] : null;
+        const nextFile = currentIndex < files.length - 1 ? files[currentIndex + 1] : null;
+
+        setNavState(
+          prevBtn,
+          Boolean(prevFile),
+          prevFile ? buildViewerUrl(folder, prevFile.name) : "#"
+        );
+
+        setNavState(
+          nextBtn,
+          Boolean(nextFile),
+          nextFile ? buildViewerUrl(folder, nextFile.name) : "#"
+        );
+      } catch (error) {
+        console.error(error);
+        setNavState(prevBtn, false);
+        setNavState(nextBtn, false);
+      }
     }
+
+    init();
   </script>
 </body>
 </html>
