@@ -1,9 +1,8 @@
-<!-- /viewer.html -->
 <!doctype html>
 <html lang="tr">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>PDF</title>
   <style>
     :root{
@@ -15,7 +14,9 @@
       --shadow:0 10px 30px rgba(0,0,0,.06);
     }
 
-    *{ box-sizing:border-box; }
+    *{
+      box-sizing:border-box;
+    }
 
     html, body{
       margin:0;
@@ -36,28 +37,20 @@
     #app{
       position:fixed;
       inset:0;
-      padding:0;
-      margin:0;
       width:100vw;
       height:100vh;
-      overflow:hidden;
       background:var(--bg);
+      overflow:hidden;
     }
 
-    #frameWrap{
+    #pdfFrame{
       position:absolute;
       inset:0;
       width:100%;
       height:100%;
-      background:var(--panel);
-    }
-
-    #pdfFrame{
-      display:block;
-      width:100%;
-      height:100%;
       border:0;
       background:#fff;
+      display:block;
     }
 
     #overlay{
@@ -67,7 +60,7 @@
       align-items:center;
       justify-content:center;
       padding:20px;
-      background:linear-gradient(to bottom, rgba(243,244,246,.96), rgba(243,244,246,.92));
+      background:rgba(243,244,246,.96);
       z-index:10;
       transition:opacity .18s ease, visibility .18s ease;
     }
@@ -78,32 +71,32 @@
       pointer-events:none;
     }
 
-    .stateCard{
+    .card{
       width:min(720px, calc(100vw - 32px));
       background:var(--panel);
       border:1px solid var(--line);
       border-radius:18px;
       box-shadow:var(--shadow);
-      padding:18px 18px 16px;
+      padding:18px;
     }
 
-    .stateTitle{
+    .title{
       margin:0 0 8px 0;
       font-size:1rem;
       font-weight:750;
-      color:var(--text);
+      line-height:1.4;
       word-break:break-word;
     }
 
-    .stateText{
+    .text{
       margin:0;
       color:var(--muted);
-      line-height:1.45;
+      line-height:1.5;
       font-size:.95rem;
       word-break:break-word;
     }
 
-    .stateActions{
+    .actions{
       display:flex;
       flex-wrap:wrap;
       gap:10px;
@@ -138,8 +131,8 @@
       border-radius:999px;
       display:inline-block;
       vertical-align:-3px;
-      animation:spin .75s linear infinite;
       margin-right:8px;
+      animation:spin .75s linear infinite;
     }
 
     @keyframes spin{
@@ -150,48 +143,49 @@
 </head>
 <body>
   <div id="app">
-    <div id="frameWrap">
-      <iframe id="pdfFrame" title="PDF görüntüleyici" referrerpolicy="no-referrer"></iframe>
-    </div>
+    <iframe id="pdfFrame" title="PDF görüntüleyici"></iframe>
 
     <div id="overlay">
-      <div class="stateCard">
-        <h1 id="stateTitle" class="stateTitle">PDF yükleniyor…</h1>
-        <p id="stateText" class="stateText">
+      <div class="card">
+        <h1 id="title" class="title">PDF hazırlanıyor…</h1>
+        <p id="message" class="text">
           <span class="spinner" aria-hidden="true"></span>
-          Görüntüleyici hazırlanıyor…
+          PDF yükleniyor…
         </p>
-        <div id="stateActions" class="stateActions" hidden>
-          <a id="directOpenBtn" class="btn" href="#" target="_blank" rel="noopener">Doğrudan aç</a>
-          <button id="reloadBtn" class="btn" type="button">Yenile</button>
+        <div id="actions" class="actions" hidden>
+          <a id="openBtn" class="btn" href="#" target="_blank" rel="noopener">Yeni sekmede aç</a>
         </div>
       </div>
     </div>
   </div>
 
   <script>
-    const PDFJS_WEB_VIEWER = "https://mozilla.github.io/pdf.js/web/viewer.html";
-
     const params = new URLSearchParams(location.search);
     const rawPdf = params.get("pdf") || "";
     const rawName = params.get("name") || "";
 
     const pdfFrame = document.getElementById("pdfFrame");
     const overlay = document.getElementById("overlay");
-    const stateTitle = document.getElementById("stateTitle");
-    const stateText = document.getElementById("stateText");
-    const stateActions = document.getElementById("stateActions");
-    const directOpenBtn = document.getElementById("directOpenBtn");
-    const reloadBtn = document.getElementById("reloadBtn");
+    const titleEl = document.getElementById("title");
+    const messageEl = document.getElementById("message");
+    const actionsEl = document.getElementById("actions");
+    const openBtn = document.getElementById("openBtn");
 
-    let currentPdfUrl = "";
-    let loadTimeoutId = 0;
+    let timeoutId = 0;
 
     function decodeSafe(value){
       try{
         return decodeURIComponent(value);
       }catch{
         return value;
+      }
+    }
+
+    function buildAbsoluteUrl(input){
+      try{
+        return new URL(decodeSafe(input), location.href).toString();
+      }catch{
+        return decodeSafe(input);
       }
     }
 
@@ -205,21 +199,12 @@
       }
     }
 
-    function humanTitle(){
-      const name = decodeSafe(rawName) || fileNameFromUrl(currentPdfUrl || rawPdf);
+    function getTitle(){
+      const name = decodeSafe(rawName) || fileNameFromUrl(rawPdf);
       return String(name || "PDF")
         .replace(/\.pdf$/i, "")
-        .replace(/[_-]+/g, " ")
         .replace(/\s+/g, " ")
         .trim() || "PDF";
-    }
-
-    function buildAbsolutePdfUrl(input){
-      try{
-        return new URL(decodeSafe(input), location.href).toString();
-      }catch{
-        return decodeSafe(input);
-      }
     }
 
     function buildFreshUrl(url){
@@ -228,26 +213,16 @@
       return u.toString();
     }
 
-    function buildPdfJsViewerUrl(pdfUrl){
-      return `${PDFJS_WEB_VIEWER}?file=${encodeURIComponent(pdfUrl)}`;
-    }
-
-    function showLoading(message){
-      stateTitle.textContent = humanTitle() || "PDF yükleniyor…";
-      stateText.innerHTML = `<span class="spinner" aria-hidden="true"></span>${message || "PDF yükleniyor…"}`;
-      stateActions.hidden = true;
-      overlay.classList.remove("hidden");
-    }
-
-    function showError(message){
-      stateTitle.textContent = humanTitle() || "PDF açılamadı";
-      stateText.textContent = message || "PDF yüklenemedi.";
-      stateActions.hidden = false;
-      overlay.classList.remove("hidden");
-    }
-
     function hideOverlay(){
       overlay.classList.add("hidden");
+    }
+
+    function showError(text, url){
+      titleEl.textContent = getTitle();
+      messageEl.textContent = text || "PDF açılamadı.";
+      actionsEl.hidden = false;
+      openBtn.href = url || "#";
+      overlay.classList.remove("hidden");
     }
 
     async function verifyPdf(url){
@@ -273,131 +248,40 @@
       }
     }
 
-    function clearPendingTimeout(){
-      if (loadTimeoutId){
-        clearTimeout(loadTimeoutId);
-        loadTimeoutId = 0;
-      }
-    }
+    async function init(){
+      const absUrl = buildAbsoluteUrl(rawPdf);
 
-    function startFrameLoad(viewerUrl){
-      clearPendingTimeout();
+      if (!absUrl){
+        showError("PDF yolu bulunamadı.", "#");
+        pdfFrame.src = "about:blank";
+        return;
+      }
+
+      titleEl.textContent = getTitle();
+      openBtn.href = buildFreshUrl(absUrl);
+
+      const ok = await verifyPdf(buildFreshUrl(absUrl));
+      if (!ok){
+        showError("PDF dosyasına erişilemedi.", buildFreshUrl(absUrl));
+        pdfFrame.src = "about:blank";
+        return;
+      }
 
       pdfFrame.onload = () => {
-        clearPendingTimeout();
+        clearTimeout(timeoutId);
         hideOverlay();
       };
 
-      pdfFrame.src = viewerUrl;
+      pdfFrame.src = buildFreshUrl(absUrl);
 
-      loadTimeoutId = setTimeout(() => {
-        showError("PDF görüntüleyici yanıt vermedi. Doğrudan aç ile deneyin.");
-      }, 15000);
+      timeoutId = setTimeout(() => {
+        showError("Yerleşik görüntüleyici yüklenemedi. Yeni sekmede açmayı deneyin.", buildFreshUrl(absUrl));
+      }, 12000);
     }
 
-    async function loadPdf(){
-      currentPdfUrl = buildAbsolutePdfUrl(rawPdf);
-
-      if (!currentPdfUrl){
-        showError("PDF yolu bulunamadı.");
-        pdfFrame.src = "about:blank";
-        return;
-      }
-
-      document.title = humanTitle() || "PDF";
-      directOpenBtn.href = buildFreshUrl(currentPdfUrl);
-
-      showLoading("PDF kontrol ediliyor…");
-
-      const freshPdfUrl = buildFreshUrl(currentPdfUrl);
-      const ok = await verifyPdf(freshPdfUrl);
-
-      if (!ok){
-        showError("PDF dosyasına erişilemedi. Doğrudan aç ile deneyin.");
-        pdfFrame.src = "about:blank";
-        return;
-      }
-
-      showLoading("PDF.js görüntüleyici açılıyor…");
-      startFrameLoad(buildPdfJsViewerUrl(freshPdfUrl));
-    }
-
-    reloadBtn.addEventListener("click", () => {
-      loadPdf().catch((err) => {
-        console.error(err);
-        showError("PDF yeniden yüklenemedi.");
-      });
-    });
-
-    window.addEventListener("message", async (event) => {
-      const data = event && event.data;
-      if (!data || typeof data !== "object") return;
-
-      if (data.type === "fsp-pdf-copy-all-text"){
-        try{
-          const text = await extractPdfText(currentPdfUrl);
-          event.source?.postMessage({
-            type: "fsp-pdf-copy-all-text-result",
-            ok: true,
-            text
-          }, "*");
-        }catch(err){
-          event.source?.postMessage({
-            type: "fsp-pdf-copy-all-text-result",
-            ok: false,
-            error: err?.message || "text extraction failed"
-          }, "*");
-        }
-      }
-    });
-
-    async function ensurePdfJsLib(){
-      if (window.pdfjsLib) return window.pdfjsLib;
-
-      await new Promise((resolve, reject) => {
-        const s = document.createElement("script");
-        s.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/pdf.min.js";
-        s.onload = resolve;
-        s.onerror = reject;
-        document.head.appendChild(s);
-      });
-
-      window.pdfjsLib.GlobalWorkerOptions.workerSrc =
-        "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.4.168/pdf.worker.min.js";
-
-      return window.pdfjsLib;
-    }
-
-    async function extractPdfText(pdfUrl){
-      const pdfjsLib = await ensurePdfJsLib();
-      const loadingTask = pdfjsLib.getDocument({
-        url: buildFreshUrl(pdfUrl),
-        withCredentials: false,
-        useWorkerFetch: true,
-        isEvalSupported: false,
-        disableAutoFetch: false,
-        disableStream: false,
-        disableRange: false
-      });
-
-      const pdf = await loadingTask.promise;
-      const parts = [];
-
-      for (let pageNo = 1; pageNo <= pdf.numPages; pageNo++){
-        const page = await pdf.getPage(pageNo);
-        const textContent = await page.getTextContent();
-        const strings = (textContent.items || [])
-          .map(item => item && typeof item.str === "string" ? item.str : "")
-          .filter(Boolean);
-        parts.push(strings.join(" "));
-      }
-
-      return parts.join("\n\n").trim();
-    }
-
-    loadPdf().catch((err) => {
+    init().catch((err) => {
       console.error(err);
-      showError("PDF yüklenemedi.");
+      showError("PDF yüklenemedi.", buildAbsoluteUrl(rawPdf));
     });
   </script>
 </body>
