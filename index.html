@@ -38,7 +38,7 @@
     }
 
     .page {
-      max-width: 1100px;
+      max-width: 1220px;
       margin: 0 auto;
     }
 
@@ -171,7 +171,7 @@
 
     .list-head {
       display: grid;
-      grid-template-columns: 72px 1fr auto;
+      grid-template-columns: 72px 1fr 90px 100px auto;
       gap: 16px;
       align-items: center;
       padding: 18px 22px;
@@ -179,6 +179,10 @@
       font-size: 14px;
       color: var(--muted);
       font-weight: 600;
+    }
+
+    .list-head .download-head {
+      text-align: right;
     }
 
     .state {
@@ -192,13 +196,11 @@
 
     .row {
       display: grid;
-      grid-template-columns: 72px 1fr auto;
+      grid-template-columns: 72px 1fr 90px 100px auto;
       gap: 16px;
       align-items: center;
       padding: 16px 22px;
       border-top: 1px solid var(--line);
-      text-decoration: none;
-      color: inherit;
     }
 
     .row:nth-child(odd) {
@@ -219,6 +221,16 @@
       font-variant-numeric: tabular-nums;
     }
 
+    .name-link {
+      color: inherit;
+      text-decoration: none;
+      min-width: 0;
+    }
+
+    .name-link:hover .name {
+      text-decoration: underline;
+    }
+
     .name {
       font-size: 16px;
       font-weight: 600;
@@ -226,11 +238,31 @@
       word-break: break-word;
     }
 
+    .pages,
     .size {
       font-size: 14px;
       color: var(--muted);
       white-space: nowrap;
       font-variant-numeric: tabular-nums;
+    }
+
+    .download-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 38px;
+      padding: 0 12px;
+      border-radius: 10px;
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--text);
+      text-decoration: none;
+      font-size: 14px;
+      white-space: nowrap;
+    }
+
+    .download-btn:hover {
+      background: #f8fafc;
     }
 
     .note {
@@ -245,7 +277,7 @@
       border-radius: 8px;
     }
 
-    @media (max-width: 640px) {
+    @media (max-width: 860px) {
       body {
         padding: 16px;
       }
@@ -261,13 +293,28 @@
         padding-right: 16px;
       }
 
-      .list-head,
+      .list-head {
+        grid-template-columns: 56px 1fr;
+      }
+
+      .list-head .pages-head,
+      .list-head .size-head,
+      .list-head .download-head {
+        display: none;
+      }
+
       .row {
         grid-template-columns: 56px 1fr;
       }
 
-      .size {
+      .pages,
+      .size,
+      .download-btn {
         grid-column: 2;
+      }
+
+      .download-btn {
+        justify-self: start;
       }
     }
   </style>
@@ -290,14 +337,16 @@
         </button>
       </div>
 
-      <div class="note">Satıra tıklayınca görüntüleyici açılır.</div>
+      <div class="note">Dosya adına tıklayınca görüntüleyici açılır. Sağdaki butondan doğrudan indirebilirsiniz.</div>
     </section>
 
     <section class="panel">
       <div class="list-head">
         <div>No</div>
         <div>Dosya</div>
-        <div>Boyut</div>
+        <div class="pages-head">Sayfa</div>
+        <div class="size-head">Boyut</div>
+        <div class="download-head">İndir</div>
       </div>
 
       <div id="state" class="state">PDF listesi yükleniyor...</div>
@@ -306,7 +355,12 @@
   </main>
 
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
-  <script>
+  <script type="module">
+    import * as pdfjsLib from "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.4.168/build/pdf.min.mjs";
+
+    pdfjsLib.GlobalWorkerOptions.workerSrc =
+      "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.4.168/build/pdf.worker.min.mjs";
+
     const owner = "protokolFSP";
     const repo = "FSP-pdfs";
     const branch = "main";
@@ -327,6 +381,7 @@
     let visibleFiles = [];
     let currentFolderKey = "";
     let loadAbortController = null;
+    const pageCountCache = new Map();
 
     function escapeHtml(value) {
       return String(value)
@@ -426,8 +481,7 @@
     }
 
     function getFolderFromUrl() {
-      const folder = new URLSearchParams(window.location.search).get("folder") || "";
-      return folder;
+      return new URLSearchParams(window.location.search).get("folder") || "";
     }
 
     function updateUrlState(push = false) {
@@ -450,6 +504,90 @@
       zipBtnEl.disabled = isLoading || !visibleFiles.length;
       zipSpinnerEl.hidden = !isLoading;
       zipBtnTextEl.textContent = text;
+    }
+
+    function getPageCountCacheKey(fileName) {
+      return `${currentFolderKey}::${fileName}`;
+    }
+
+    function getStoredPageCount(cacheKey) {
+      try {
+        const value = sessionStorage.getItem(`pdf-pages:${cacheKey}`);
+        if (!value) return null;
+        const parsed = Number(value);
+        return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+      } catch {
+        return null;
+      }
+    }
+
+    function setStoredPageCount(cacheKey, value) {
+      try {
+        sessionStorage.setItem(`pdf-pages:${cacheKey}`, String(value));
+      } catch {
+      }
+    }
+
+    async function getPdfPageCount(fileName) {
+      const cacheKey = getPageCountCacheKey(fileName);
+
+      if (pageCountCache.has(cacheKey)) {
+        return pageCountCache.get(cacheKey);
+      }
+
+      const stored = getStoredPageCount(cacheKey);
+      if (stored) {
+        pageCountCache.set(cacheKey, stored);
+        return stored;
+      }
+
+      const pdfUrl = getPagesPdfUrl(fileName);
+      const task = pdfjsLib.getDocument({
+        url: pdfUrl,
+        withCredentials: false
+      });
+
+      const pdf = await task.promise;
+      const count = pdf.numPages;
+
+      pageCountCache.set(cacheKey, count);
+      setStoredPageCount(cacheKey, count);
+
+      if (typeof pdf.destroy === "function") {
+        pdf.destroy();
+      }
+
+      return count;
+    }
+
+    async function fillPageCounts(files) {
+      const activeFolderAtStart = currentFolderKey;
+
+      for (const file of files) {
+        if (activeFolderAtStart !== currentFolderKey) {
+          return;
+        }
+
+        const cacheKey = getPageCountCacheKey(file.name);
+        let count = pageCountCache.get(cacheKey) || getStoredPageCount(cacheKey);
+
+        if (!count) {
+          try {
+            count = await getPdfPageCount(file.name);
+          } catch (error) {
+            console.error(error);
+            count = "—";
+            pageCountCache.set(cacheKey, count);
+          }
+        }
+
+        const safeName = CSS.escape(file.name);
+        const cell = rowsEl.querySelector(`[data-pages-for="${safeName}"]`);
+
+        if (cell) {
+          cell.textContent = count === "—" ? "—" : `${count}`;
+        }
+      }
     }
 
     function renderFolders() {
@@ -494,18 +632,28 @@
       setZipLoadingState(false, "ZIP indir");
 
       for (const [index, file] of files.entries()) {
-        const link = document.createElement("a");
-        link.className = "row";
-        link.href = buildViewerUrl(file.name);
+        const row = document.createElement("div");
+        row.className = "row";
 
-        link.innerHTML = `
+        const viewerUrl = buildViewerUrl(file.name);
+        const pdfUrl = getPagesPdfUrl(file.name);
+        const cacheKey = getPageCountCacheKey(file.name);
+        const cachedPageCount = pageCountCache.get(cacheKey) || getStoredPageCount(cacheKey);
+
+        row.innerHTML = `
           <div class="index">${index + 1}</div>
-          <div class="name">${escapeHtml(formatName(file.name))}</div>
+          <a class="name-link" href="${escapeHtml(viewerUrl)}">
+            <div class="name">${escapeHtml(formatName(file.name))}</div>
+          </a>
+          <div class="pages" data-pages-for="${escapeHtml(file.name)}">${cachedPageCount || "…"}</div>
           <div class="size">${escapeHtml(formatSize(file.size))}</div>
+          <a class="download-btn" href="${escapeHtml(pdfUrl)}" download="${escapeHtml(file.name)}">İndir</a>
         `;
 
-        rowsEl.appendChild(link);
+        rowsEl.appendChild(row);
       }
+
+      fillPageCounts(files);
     }
 
     function applyFilter() {
@@ -690,4 +838,3 @@
   </script>
 </body>
 </html>
-
