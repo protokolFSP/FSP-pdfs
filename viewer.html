@@ -1,758 +1,290 @@
-<!-- /viewer.html -->
+
+
 <!doctype html>
 <html lang="tr">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
-  <title>PDF Görüntüleyici</title>
-  <meta name="color-scheme" content="light only" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>PDF</title>
   <style>
     :root{
-      --bg:#f5f6f8;
+      --bg:#f3f4f6;
       --panel:#ffffff;
-      --border:#dcdfe4;
       --text:#111827;
       --muted:#6b7280;
-      --blue:#2563eb;
-      --hover:#f0f4ff;
-      --shadow:0 10px 30px rgba(0,0,0,.10);
-      --toolbar-h:64px;
+      --line:#e5e7eb;
+      --shadow:0 10px 30px rgba(0,0,0,.06);
     }
 
-    *{ box-sizing:border-box; }
-    html,body{ height:100%; margin:0; }
-    body{
-      font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+    *{
+      box-sizing:border-box;
+    }
+
+    html, body{
+      margin:0;
+      padding:0;
+      width:100%;
+      height:100%;
+      background:var(--bg);
       color:var(--text);
+      font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+      overflow:hidden;
+    }
+
+    body{
+      width:100vw;
+      height:100vh;
+    }
+
+    #app{
+      position:fixed;
+      inset:0;
+      width:100vw;
+      height:100vh;
       background:var(--bg);
       overflow:hidden;
     }
 
-    #app{
-      height:100%;
-      display:grid;
-      grid-template-rows: var(--toolbar-h) 1fr;
-    }
-
-    #toolbar{
-      display:flex;
-      align-items:center;
-      gap:10px;
-      padding:10px 12px;
-      background:rgba(255,255,255,.92);
-      backdrop-filter:blur(10px);
-      border-bottom:1px solid var(--border);
-      position:relative;
-      z-index:5;
-    }
-
-    .group{
-      display:flex;
-      align-items:center;
-      gap:8px;
-      min-width:0;
-    }
-
-    .grow{ flex:1 1 auto; min-width:0; }
-
-    .btn{
-      height:42px;
-      min-width:42px;
-      padding:0 14px;
-      border:1px solid var(--border);
-      border-radius:12px;
-      background:#fff;
-      color:var(--text);
-      cursor:pointer;
-      display:inline-flex;
-      align-items:center;
-      justify-content:center;
-      gap:8px;
-      font-size:.95rem;
-      font-weight:650;
-      line-height:1;
-      user-select:none;
-      white-space:nowrap;
-    }
-
-    .btn:hover{ background:var(--hover); }
-    .btn:disabled{ opacity:.45; cursor:default; }
-
-    .iconBtn{
-      width:42px;
-      padding:0;
-    }
-
-    .btn svg{
-      width:18px;
-      height:18px;
-      display:block;
-      stroke:currentColor;
-      fill:none;
-      stroke-width:2;
-      stroke-linecap:round;
-      stroke-linejoin:round;
-    }
-
-    #titleWrap{
-      min-width:0;
-      display:flex;
-      flex-direction:column;
-      gap:2px;
-    }
-
-    #docTitle{
-      font-size:.98rem;
-      font-weight:750;
-      white-space:nowrap;
-      overflow:hidden;
-      text-overflow:ellipsis;
-    }
-
-    #docMeta{
-      font-size:.85rem;
-      color:var(--muted);
-      white-space:nowrap;
-      overflow:hidden;
-      text-overflow:ellipsis;
-    }
-
-    #pageInput{
-      width:72px;
-      height:42px;
-      padding:0 10px;
-      border:1px solid var(--border);
-      border-radius:12px;
-      background:#fff;
-      font-size:1rem;
-      text-align:center;
-      outline:none;
-    }
-
-    #zoomLabel{
-      min-width:78px;
-      height:42px;
-      padding:0 12px;
-      border:1px solid var(--border);
-      border-radius:12px;
-      background:#fff;
-      display:flex;
-      align-items:center;
-      justify-content:center;
-      font-weight:700;
-      font-variant-numeric:tabular-nums;
-    }
-
-    #viewerWrap{
-      position:relative;
-      overflow:auto;
-      padding:20px;
-      -webkit-overflow-scrolling:touch;
-    }
-
-    #viewer{
-      position:relative;
-      margin:0 auto;
-      width:max-content;
-      min-width:100%;
-    }
-
-    .pageShell{
-      position:relative;
-      margin:0 auto 20px auto;
-      background:#fff;
-      border:1px solid var(--border);
-      border-radius:10px;
-      box-shadow:var(--shadow);
-      overflow:hidden;
-    }
-
-    .canvasWrap{
-      position:relative;
-      background:#fff;
-      line-height:0;
-    }
-
-    canvas.pageCanvas{
-      display:block;
-      width:100%;
-      height:auto;
-      background:#fff;
-    }
-
-    .textLayer{
+    #pdfFrame{
       position:absolute;
       inset:0;
-      overflow:hidden;
-      line-height:1;
-      text-size-adjust:none;
-      transform-origin:0 0;
-      z-index:2;
-    }
-
-    .textLayer :is(span, br){
-      color:transparent;
-      position:absolute;
-      white-space:pre;
-      cursor:text;
-      transform-origin:0 0;
-    }
-
-    .textLayer .highlight{
-      margin:-1px;
-      padding:1px;
-      background:rgba(180,0,170,.20);
-      border-radius:4px;
-    }
-
-    .textLayer .highlight.appended{ position:initial; }
-    .textLayer .highlight.begin{ border-radius:4px 0 0 4px; }
-    .textLayer .highlight.end{ border-radius:0 4px 4px 0; }
-    .textLayer .highlight.middle{ border-radius:0; }
-
-    #loading,
-    #errorBox{
-      position:absolute;
-      left:50%;
-      top:50%;
-      transform:translate(-50%,-50%);
-      z-index:10;
+      width:100%;
+      height:100%;
+      border:0;
       background:#fff;
-      border:1px solid var(--border);
-      border-radius:16px;
+      display:block;
+    }
+
+    #overlay{
+      position:absolute;
+      inset:0;
+      display:flex;
+      align-items:center;
+      justify-content:center;
+      padding:20px;
+      background:rgba(243,244,246,.96);
+      z-index:10;
+      transition:opacity .18s ease, visibility .18s ease;
+    }
+
+    #overlay.hidden{
+      opacity:0;
+      visibility:hidden;
+      pointer-events:none;
+    }
+
+    .card{
+      width:min(720px, calc(100vw - 32px));
+      background:var(--panel);
+      border:1px solid var(--line);
+      border-radius:18px;
       box-shadow:var(--shadow);
-      padding:18px 20px;
-      min-width:min(92vw,420px);
+      padding:18px;
     }
 
-    #loading{ display:none; }
-    #errorBox{ display:none; }
-
-    #loading.on,
-    #errorBox.on{ display:block; }
-
-    #loadingTitle,
-    #errorTitle{
+    .title{
+      margin:0 0 8px 0;
       font-size:1rem;
-      font-weight:800;
-      margin:0 0 6px 0;
-    }
-
-    #loadingText,
-    #errorText{
-      font-size:.94rem;
-      color:var(--muted);
-      line-height:1.35;
-      margin:0;
-      white-space:pre-wrap;
+      font-weight:750;
+      line-height:1.4;
       word-break:break-word;
     }
 
-    #errorActions{
-      display:flex;
-      gap:8px;
-      flex-wrap:wrap;
-      margin-top:12px;
+    .text{
+      margin:0;
+      color:var(--muted);
+      line-height:1.5;
+      font-size:.95rem;
+      word-break:break-word;
     }
 
-    @media (max-width: 820px){
-      #toolbar{
-        height:auto;
-        min-height:var(--toolbar-h);
-        flex-wrap:wrap;
-      }
-      .grow{ order:-1; width:100%; }
-      #viewerWrap{ padding:12px; }
+    .actions{
+      display:flex;
+      flex-wrap:wrap;
+      gap:10px;
+      margin-top:14px;
+    }
+
+    .btn{
+      display:inline-flex;
+      align-items:center;
+      justify-content:center;
+      min-height:40px;
+      padding:0 14px;
+      border-radius:12px;
+      border:1px solid var(--line);
+      background:#fff;
+      color:var(--text);
+      text-decoration:none;
+      font-size:.92rem;
+      font-weight:650;
+      cursor:pointer;
+    }
+
+    .btn:hover{
+      background:#f9fafb;
+    }
+
+    .spinner{
+      width:18px;
+      height:18px;
+      border:2px solid #d1d5db;
+      border-top-color:#2563eb;
+      border-radius:999px;
+      display:inline-block;
+      vertical-align:-3px;
+      margin-right:8px;
+      animation:spin .75s linear infinite;
+    }
+
+    @keyframes spin{
+      from{ transform:rotate(0deg); }
+      to{ transform:rotate(360deg); }
     }
   </style>
 </head>
 <body>
   <div id="app">
-    <div id="toolbar">
-      <div class="group grow">
-        <div id="titleWrap">
-          <div id="docTitle">PDF</div>
-          <div id="docMeta">Yükleniyor…</div>
-        </div>
-      </div>
+    <iframe id="pdfFrame" title="PDF görüntüleyici"></iframe>
 
-      <div class="group">
-        <button id="prevBtn" class="btn iconBtn" type="button" title="Önceki sayfa" aria-label="Önceki sayfa">
-          <svg viewBox="0 0 24 24"><path d="M15 18l-6-6 6-6"/></svg>
-        </button>
-
-        <input id="pageInput" type="text" inputmode="numeric" value="1" aria-label="Sayfa numarası" />
-
-        <div id="pageCountBtn" class="btn" aria-label="Toplam sayfa">/ 0</div>
-
-        <button id="nextBtn" class="btn iconBtn" type="button" title="Sonraki sayfa" aria-label="Sonraki sayfa">
-          <svg viewBox="0 0 24 24"><path d="M9 18l6-6-6-6"/></svg>
-        </button>
-      </div>
-
-      <div class="group">
-        <button id="zoomOutBtn" class="btn iconBtn" type="button" title="Küçült" aria-label="Küçült">
-          <svg viewBox="0 0 24 24"><path d="M5 12h14"/></svg>
-        </button>
-
-        <div id="zoomLabel" aria-label="Yakınlaştırma">100%</div>
-
-        <button id="zoomInBtn" class="btn iconBtn" type="button" title="Büyüt" aria-label="Büyüt">
-          <svg viewBox="0 0 24 24"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
-        </button>
-
-        <button id="fitBtn" class="btn" type="button" title="Sayfa genişliğine sığdır">Fit</button>
-      </div>
-
-      <div class="group">
-        <button id="openBtn" class="btn" type="button" title="Yeni sekmede aç">Yeni sekme</button>
-        <button id="downloadBtn" class="btn" type="button" title="İndir">İndir</button>
-      </div>
-    </div>
-
-    <div id="viewerWrap">
-      <div id="viewer"></div>
-
-      <div id="loading" class="on" role="status" aria-live="polite">
-        <div id="loadingTitle">PDF yükleniyor</div>
-        <p id="loadingText">Belge hazırlanıyor…</p>
-      </div>
-
-      <div id="errorBox" role="alert">
-        <div id="errorTitle">PDF açılamadı</div>
-        <p id="errorText">Bir hata oluştu.</p>
-        <div id="errorActions">
-          <button id="retryBtn" class="btn" type="button">Tekrar dene</button>
-          <button id="fallbackOpenBtn" class="btn" type="button">Yeni sekmede aç</button>
+    <div id="overlay">
+      <div class="card">
+        <h1 id="title" class="title">PDF hazırlanıyor…</h1>
+        <p id="message" class="text">
+          <span class="spinner" aria-hidden="true"></span>
+          PDF yükleniyor…
+        </p>
+        <div id="actions" class="actions" hidden>
+          <a id="openBtn" class="btn" href="#" target="_blank" rel="noopener">Yeni sekmede aç</a>
         </div>
       </div>
     </div>
   </div>
 
-  <script type="module">
-    import * as pdfjsLib from "https://cdn.jsdelivr.net/npm/pdfjs-dist@5.6.205/build/pdf.min.mjs";
-    import { TextLayer } from "https://cdn.jsdelivr.net/npm/pdfjs-dist@5.6.205/web/pdf_viewer.min.mjs";
-
-    pdfjsLib.GlobalWorkerOptions.workerSrc =
-      "https://cdn.jsdelivr.net/npm/pdfjs-dist@5.6.205/build/pdf.worker.min.mjs";
-
+  <script>
     const params = new URLSearchParams(location.search);
-    const pdfUrl = params.get("pdf") || params.get("file") || "";
-    const docName = params.get("name") || "PDF";
+    const rawPdf = params.get("pdf") || "";
+    const rawName = params.get("name") || "";
 
-    const viewerWrap = document.getElementById("viewerWrap");
-    const viewerEl = document.getElementById("viewer");
-    const loadingEl = document.getElementById("loading");
-    const loadingTextEl = document.getElementById("loadingText");
-    const errorBoxEl = document.getElementById("errorBox");
-    const errorTextEl = document.getElementById("errorText");
-
-    const docTitleEl = document.getElementById("docTitle");
-    const docMetaEl = document.getElementById("docMeta");
-    const pageInputEl = document.getElementById("pageInput");
-    const pageCountBtnEl = document.getElementById("pageCountBtn");
-    const zoomLabelEl = document.getElementById("zoomLabel");
-
-    const prevBtn = document.getElementById("prevBtn");
-    const nextBtn = document.getElementById("nextBtn");
-    const zoomOutBtn = document.getElementById("zoomOutBtn");
-    const zoomInBtn = document.getElementById("zoomInBtn");
-    const fitBtn = document.getElementById("fitBtn");
+    const pdfFrame = document.getElementById("pdfFrame");
+    const overlay = document.getElementById("overlay");
+    const titleEl = document.getElementById("title");
+    const messageEl = document.getElementById("message");
+    const actionsEl = document.getElementById("actions");
     const openBtn = document.getElementById("openBtn");
-    const downloadBtn = document.getElementById("downloadBtn");
-    const retryBtn = document.getElementById("retryBtn");
-    const fallbackOpenBtn = document.getElementById("fallbackOpenBtn");
 
-    const state = {
-      pdfDoc: null,
-      pageCount: 0,
-      currentPage: 1,
-      scale: 1,
-      fitMode: true,
-      pageViews: [],
-      renderToken: 0
-    };
+    let timeoutId = 0;
 
-    function setLoading(on, text = "Belge hazırlanıyor…") {
-      loadingTextEl.textContent = text;
-      loadingEl.classList.toggle("on", on);
-    }
-
-    function setError(message) {
-      errorTextEl.textContent = message || "Bilinmeyen hata.";
-      errorBoxEl.classList.add("on");
-    }
-
-    function clearError() {
-      errorBoxEl.classList.remove("on");
-    }
-
-    function clamp(value, min, max) {
-      return Math.min(max, Math.max(min, value));
-    }
-
-    function updateToolbar() {
-      const count = state.pageCount || 0;
-      const page = clamp(state.currentPage, 1, Math.max(1, count || 1));
-
-      docTitleEl.textContent = decodeURIComponentSafe(docName);
-      docMetaEl.textContent = pdfUrl ? decodeURIComponentSafe(pdfUrl) : "PDF URL eksik";
-      pageInputEl.value = String(page);
-      pageCountBtnEl.textContent = `/ ${count}`;
-      zoomLabelEl.textContent = `${Math.round(state.scale * 100)}%`;
-
-      prevBtn.disabled = page <= 1;
-      nextBtn.disabled = page >= count;
-      zoomOutBtn.disabled = state.scale <= 0.35;
-      zoomInBtn.disabled = state.scale >= 4;
-      fitBtn.disabled = !count;
-      openBtn.disabled = !pdfUrl;
-      downloadBtn.disabled = !pdfUrl;
-    }
-
-    function decodeURIComponentSafe(value) {
-      try {
+    function decodeSafe(value){
+      try{
         return decodeURIComponent(value);
-      } catch {
+      }catch{
         return value;
       }
     }
 
-    function estimateFitScale(viewportWidth, pageWidth) {
-      const horizontalPadding = 2;
-      const available = Math.max(320, viewportWidth - 24 - horizontalPadding);
-      return clamp(available / pageWidth, 0.35, 4);
-    }
-
-    async function createPageShell(pageNumber) {
-      const page = await state.pdfDoc.getPage(pageNumber);
-      const baseViewport = page.getViewport({ scale: 1 });
-
-      const shell = document.createElement("section");
-      shell.className = "pageShell";
-      shell.dataset.pageNumber = String(pageNumber);
-
-      const wrap = document.createElement("div");
-      wrap.className = "canvasWrap";
-
-      const canvas = document.createElement("canvas");
-      canvas.className = "pageCanvas";
-
-      const textLayerDiv = document.createElement("div");
-      textLayerDiv.className = "textLayer";
-
-      wrap.appendChild(canvas);
-      wrap.appendChild(textLayerDiv);
-      shell.appendChild(wrap);
-      viewerEl.appendChild(shell);
-
-      return {
-        pageNumber,
-        page,
-        baseViewport,
-        shell,
-        wrap,
-        canvas,
-        textLayerDiv,
-        renderTask: null,
-        renderedScale: 0
-      };
-    }
-
-    async function buildAllPages() {
-      viewerEl.innerHTML = "";
-      state.pageViews = [];
-
-      for (let pageNumber = 1; pageNumber <= state.pageCount; pageNumber += 1) {
-        const view = await createPageShell(pageNumber);
-        state.pageViews.push(view);
+    function buildAbsoluteUrl(input){
+      try{
+        return new URL(decodeSafe(input), location.href).toString();
+      }catch{
+        return decodeSafe(input);
       }
     }
 
-    async function renderPageView(view, token) {
-      if (!view || token !== state.renderToken) return;
-
-      if (view.renderTask) {
-        try {
-          view.renderTask.cancel();
-        } catch {}
-        view.renderTask = null;
-      }
-
-      const outputScale = Math.max(1, window.devicePixelRatio || 1);
-      const viewport = view.page.getViewport({ scale: state.scale });
-
-      const canvas = view.canvas;
-      const context = canvas.getContext("2d", { alpha: false });
-
-      canvas.width = Math.floor(viewport.width * outputScale);
-      canvas.height = Math.floor(viewport.height * outputScale);
-      canvas.style.width = `${viewport.width}px`;
-      canvas.style.height = `${viewport.height}px`;
-
-      view.wrap.style.width = `${viewport.width}px`;
-      view.wrap.style.height = `${viewport.height}px`;
-      view.shell.style.width = `${viewport.width}px`;
-
-      view.textLayerDiv.replaceChildren();
-      view.textLayerDiv.style.width = `${viewport.width}px`;
-      view.textLayerDiv.style.height = `${viewport.height}px`;
-
-      const transform = outputScale !== 1 ? [outputScale, 0, 0, outputScale, 0, 0] : null;
-
-      const renderContext = {
-        canvasContext: context,
-        viewport,
-        transform
-      };
-
-      view.renderTask = view.page.render(renderContext);
-
-      await view.renderTask.promise;
-      if (token !== state.renderToken) return;
-
-      const textContent = await view.page.getTextContent();
-      if (token !== state.renderToken) return;
-
-      const textLayer = new TextLayer({
-        container: view.textLayerDiv,
-        textContentSource: textContent,
-        viewport
-      });
-
-      await textLayer.render();
-      view.renderedScale = state.scale;
-    }
-
-    async function renderAllPages() {
-      if (!state.pdfDoc) return;
-
-      state.renderToken += 1;
-      const token = state.renderToken;
-
-      setLoading(true, "Sayfalar çiziliyor…");
-      clearError();
-
-      try {
-        for (const view of state.pageViews) {
-          await renderPageView(view, token);
-          if (token !== state.renderToken) return;
-        }
-        setLoading(false);
-        updateToolbar();
-        scrollToPage(state.currentPage, false);
-      } catch (error) {
-        if (error?.name === "RenderingCancelledException") return;
-        setLoading(false);
-        setError(`Render hatası:\n${error?.message || String(error)}`);
+    function fileNameFromUrl(url){
+      try{
+        const u = new URL(url, location.href);
+        const raw = (u.pathname || "").split("/").pop() || "PDF";
+        return decodeSafe(raw);
+      }catch{
+        return "PDF";
       }
     }
 
-    function findCurrentPageFromScroll() {
-      const wrapTop = viewerWrap.getBoundingClientRect().top;
-      let bestPage = 1;
-      let bestDistance = Infinity;
-
-      for (const view of state.pageViews) {
-        const rect = view.shell.getBoundingClientRect();
-        const distance = Math.abs(rect.top - wrapTop - 20);
-        if (distance < bestDistance) {
-          bestDistance = distance;
-          bestPage = view.pageNumber;
-        }
-      }
-
-      state.currentPage = bestPage;
-      updateToolbar();
+    function getTitle(){
+      const name = decodeSafe(rawName) || fileNameFromUrl(rawPdf);
+      return String(name || "PDF")
+        .replace(/\.pdf$/i, "")
+        .replace(/\s+/g, " ")
+        .trim() || "PDF";
     }
 
-    function scrollToPage(pageNumber, smooth = true) {
-      const view = state.pageViews[pageNumber - 1];
-      if (!view) return;
-
-      view.shell.scrollIntoView({
-        behavior: smooth ? "smooth" : "auto",
-        block: "start",
-        inline: "nearest"
-      });
+    function buildFreshUrl(url){
+      const u = new URL(url, location.href);
+      u.searchParams.set("_ts", String(Date.now()));
+      return u.toString();
     }
 
-    async function applyFit() {
-      if (!state.pdfDoc || !state.pageViews.length) return;
-      const first = state.pageViews[0];
-      const newScale = estimateFitScale(viewerWrap.clientWidth, first.baseViewport.width);
-      if (Math.abs(newScale - state.scale) < 0.001) {
-        updateToolbar();
-        return;
-      }
-      state.scale = newScale;
-      state.fitMode = true;
-      updateToolbar();
-      await renderAllPages();
+    function hideOverlay(){
+      overlay.classList.add("hidden");
     }
 
-    async function setScale(nextScale, fitMode = false) {
-      const clamped = clamp(nextScale, 0.35, 4);
-      if (Math.abs(clamped - state.scale) < 0.001 && fitMode === state.fitMode) {
-        updateToolbar();
-        return;
-      }
-      state.scale = clamped;
-      state.fitMode = fitMode;
-      updateToolbar();
-      await renderAllPages();
+    function showError(text, url){
+      titleEl.textContent = getTitle();
+      messageEl.textContent = text || "PDF açılamadı.";
+      actionsEl.hidden = false;
+      openBtn.href = url || "#";
+      overlay.classList.remove("hidden");
     }
 
-    async function loadPdf() {
-      clearError();
-
-      if (!pdfUrl) {
-        setLoading(false);
-        setError("URL parametresi eksik. viewer.html?pdf=PDF_URL&name=DOSYA_ADI kullan.");
-        updateToolbar();
-        return;
-      }
-
-      setLoading(true, "PDF indiriliyor…");
-
-      try {
-        const loadingTask = pdfjsLib.getDocument({
-          url: pdfUrl,
-          withCredentials: false,
-          cMapPacked: true,
-          enableXfa: true,
-          isEvalSupported: true,
-          useWorkerFetch: true,
-          disableRange: false,
-          disableStream: false,
-          disableAutoFetch: false
+    async function verifyPdf(url){
+      try{
+        const r = await fetch(url, {
+          method: "HEAD",
+          cache: "no-store",
+          mode: "cors"
         });
+        if (r.ok) return true;
+      }catch{}
 
-        const pdfDoc = await loadingTask.promise;
-        state.pdfDoc = pdfDoc;
-        state.pageCount = pdfDoc.numPages;
-        state.currentPage = 1;
-
-        updateToolbar();
-        setLoading(true, `Sayfalar hazırlanıyor… (${state.pageCount})`);
-
-        await buildAllPages();
-        await applyFit();
-
-        setLoading(false);
-        updateToolbar();
-      } catch (error) {
-        setLoading(false);
-        setError(`PDF yüklenemedi.\n${error?.message || String(error)}\n\nCORS veya bozuk PDF olabilir.`);
-        updateToolbar();
+      try{
+        const r = await fetch(url, {
+          method: "GET",
+          cache: "no-store",
+          mode: "cors",
+          headers: { Range: "bytes=0-1" }
+        });
+        return r.ok;
+      }catch{
+        return false;
       }
     }
 
-    prevBtn.addEventListener("click", () => {
-      state.currentPage = clamp(state.currentPage - 1, 1, state.pageCount || 1);
-      updateToolbar();
-      scrollToPage(state.currentPage);
-    });
+    async function init(){
+      const absUrl = buildAbsoluteUrl(rawPdf);
 
-    nextBtn.addEventListener("click", () => {
-      state.currentPage = clamp(state.currentPage + 1, 1, state.pageCount || 1);
-      updateToolbar();
-      scrollToPage(state.currentPage);
-    });
-
-    pageInputEl.addEventListener("keydown", (event) => {
-      if (event.key !== "Enter") return;
-      event.preventDefault();
-      const next = Number(pageInputEl.value);
-      if (!Number.isFinite(next)) {
-        pageInputEl.value = String(state.currentPage);
+      if (!absUrl){
+        showError("PDF yolu bulunamadı.", "#");
+        pdfFrame.src = "about:blank";
         return;
       }
-      state.currentPage = clamp(Math.round(next), 1, state.pageCount || 1);
-      updateToolbar();
-      scrollToPage(state.currentPage);
-    });
 
-    zoomOutBtn.addEventListener("click", async () => {
-      await setScale(state.scale / 1.15, false);
-    });
+      titleEl.textContent = getTitle();
+      openBtn.href = buildFreshUrl(absUrl);
 
-    zoomInBtn.addEventListener("click", async () => {
-      await setScale(state.scale * 1.15, false);
-    });
-
-    fitBtn.addEventListener("click", async () => {
-      await applyFit();
-    });
-
-    openBtn.addEventListener("click", () => {
-      if (!pdfUrl) return;
-      window.open(pdfUrl, "_blank", "noopener,noreferrer");
-    });
-
-    fallbackOpenBtn.addEventListener("click", () => {
-      if (!pdfUrl) return;
-      window.open(pdfUrl, "_blank", "noopener,noreferrer");
-    });
-
-    downloadBtn.addEventListener("click", () => {
-      if (!pdfUrl) return;
-      const a = document.createElement("a");
-      a.href = pdfUrl;
-      a.download = decodeURIComponentSafe(docName || "document.pdf");
-      a.rel = "noopener";
-      a.target = "_blank";
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-    });
-
-    retryBtn.addEventListener("click", async () => {
-      await loadPdf();
-    });
-
-    let scrollTimer = 0;
-    viewerWrap.addEventListener("scroll", () => {
-      window.clearTimeout(scrollTimer);
-      scrollTimer = window.setTimeout(findCurrentPageFromScroll, 60);
-    }, { passive: true });
-
-    let resizeTimer = 0;
-    window.addEventListener("resize", () => {
-      if (!state.pdfDoc) return;
-      window.clearTimeout(resizeTimer);
-      resizeTimer = window.setTimeout(async () => {
-        if (state.fitMode) {
-          await applyFit();
-        } else {
-          updateToolbar();
-        }
-      }, 120);
-    });
-
-    document.addEventListener("keydown", async (event) => {
-      if (event.target && /input|textarea/i.test(event.target.tagName)) return;
-
-      if (event.key === "ArrowLeft") {
-        event.preventDefault();
-        prevBtn.click();
-      } else if (event.key === "ArrowRight") {
-        event.preventDefault();
-        nextBtn.click();
-      } else if (event.key === "+" || event.key === "=") {
-        event.preventDefault();
-        await setScale(state.scale * 1.15, false);
-      } else if (event.key === "-") {
-        event.preventDefault();
-        await setScale(state.scale / 1.15, false);
-      } else if (event.key === "0") {
-        event.preventDefault();
-        await applyFit();
+      const ok = await verifyPdf(buildFreshUrl(absUrl));
+      if (!ok){
+        showError("PDF dosyasına erişilemedi.", buildFreshUrl(absUrl));
+        pdfFrame.src = "about:blank";
+        return;
       }
-    });
 
-    updateToolbar();
-    await loadPdf();
+      pdfFrame.onload = () => {
+        clearTimeout(timeoutId);
+        hideOverlay();
+      };
+
+      pdfFrame.src = buildFreshUrl(absUrl);
+
+      timeoutId = setTimeout(() => {
+        showError("Yerleşik görüntüleyici yüklenemedi. Yeni sekmede açmayı deneyin.", buildFreshUrl(absUrl));
+      }, 12000);
+    }
+
+    init().catch((err) => {
+      console.error(err);
+      showError("PDF yüklenemedi.", buildAbsoluteUrl(rawPdf));
+    });
   </script>
 </body>
 </html>
