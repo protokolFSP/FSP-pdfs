@@ -338,7 +338,7 @@
         </button>
       </div>
 
-      <div class="note">Dosya adına tıklayınca görüntüleyici açılır. Sağdaki butondan doğrudan indirebilirsiniz.</div>
+      <div class="note">Dosya adına tıklayınca PDF.js görüntüleyici açılır. Sağdaki butondan doğrudan indirebilirsiniz.</div>
     </section>
 
     <section class="panel">
@@ -357,10 +357,10 @@
 
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script type="module">
-    import * as pdfjsLib from "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.4.168/build/pdf.min.mjs";
+    import * as pdfjsLib from "https://cdn.jsdelivr.net/npm/pdfjs-dist@5.6.205/build/pdf.min.mjs";
 
     pdfjsLib.GlobalWorkerOptions.workerSrc =
-      "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.4.168/build/pdf.worker.min.mjs";
+      "https://cdn.jsdelivr.net/npm/pdfjs-dist@5.6.205/build/pdf.worker.min.mjs";
 
     const owner = "protokolFSP";
     const repo = "FSP-pdfs";
@@ -383,6 +383,7 @@
     let currentFolderKey = "";
     let loadAbortController = null;
     const pageCountCache = new Map();
+    const pageCountTaskCache = new Map();
 
     function escapeHtml(value) {
       return String(value)
@@ -391,6 +392,10 @@
         .replaceAll(">", "&gt;")
         .replaceAll('"', "&quot;")
         .replaceAll("'", "&#39;");
+    }
+
+    function escapeAttr(value) {
+      return escapeHtml(value);
     }
 
     function formatName(filename) {
@@ -461,8 +466,8 @@
       return `${rootDocsPath}/${folderKey}`;
     }
 
-    function getPagesPdfUrl(fileName) {
-      const encodedFolderPath = getFolderPath(currentFolderKey)
+    function getPagesPdfUrl(fileName, folderKey = currentFolderKey) {
+      const encodedFolderPath = getFolderPath(folderKey)
         .split("/")
         .map(encodeURIComponent)
         .join("/");
@@ -471,7 +476,7 @@
     }
 
     function buildViewerUrl(fileName) {
-      const pdfUrl = getPagesPdfUrl(fileName);
+      const pdfUrl = getPagesPdfUrl(fileName, currentFolderKey);
       const params = new URLSearchParams();
 
       params.set("pdf", pdfUrl);
@@ -507,8 +512,8 @@
       zipBtnTextEl.textContent = text;
     }
 
-    function getPageCountCacheKey(fileName) {
-      return `${currentFolderKey}::${fileName}`;
+    function getPageCountCacheKey(folderKey, fileName) {
+      return `${folderKey}::${fileName}`;
     }
 
     function getStoredPageCount(cacheKey) {
@@ -529,8 +534,16 @@
       }
     }
 
-    async function getPdfPageCount(fileName) {
-      const cacheKey = getPageCountCacheKey(fileName);
+    async function destroyPdfDocument(pdf) {
+      if (!pdf || typeof pdf.destroy !== "function") return;
+      try {
+        await pdf.destroy();
+      } catch {
+      }
+    }
+
+    async function getPdfPageCount(fileName, folderKey = currentFolderKey) {
+      const cacheKey = getPageCountCacheKey(folderKey, fileName);
 
       if (pageCountCache.has(cacheKey)) {
         return pageCountCache.get(cacheKey);
@@ -542,39 +555,59 @@
         return stored;
       }
 
-      const pdfUrl = getPagesPdfUrl(fileName);
-      const task = pdfjsLib.getDocument({
-        url: pdfUrl,
-        withCredentials: false
-      });
-
-      const pdf = await task.promise;
-      const count = pdf.numPages;
-
-      pageCountCache.set(cacheKey, count);
-      setStoredPageCount(cacheKey, count);
-
-      if (typeof pdf.destroy === "function") {
-        pdf.destroy();
+      if (pageCountTaskCache.has(cacheKey)) {
+        return pageCountTaskCache.get(cacheKey);
       }
 
-      return count;
+      const taskPromise = (async () => {
+        const pdfUrl = getPagesPdfUrl(fileName, folderKey);
+        const loadingTask = pdfjsLib.getDocument({
+          url: pdfUrl,
+          withCredentials: false,
+          useWorkerFetch: true,
+          disableRange: false,
+          disableStream: false,
+          disableAutoFetch: false
+        });
+
+        let pdf = null;
+
+        try {
+          pdf = await loadingTask.promise;
+          const count = pdf.numPages;
+          pageCountCache.set(cacheKey, count);
+          setStoredPageCount(cacheKey, count);
+          return count;
+        } finally {
+          try {
+            await loadingTask.destroy();
+          } catch {
+          }
+          await destroyPdfDocument(pdf);
+        }
+      })();
+
+      pageCountTaskCache.set(cacheKey, taskPromise);
+
+      try {
+        return await taskPromise;
+      } finally {
+        pageCountTaskCache.delete(cacheKey);
+      }
     }
 
-    async function fillPageCounts(files) {
-      const activeFolderAtStart = currentFolderKey;
-
+    async function fillPageCounts(files, folderKeyAtStart) {
       for (const file of files) {
-        if (activeFolderAtStart !== currentFolderKey) {
+        if (folderKeyAtStart !== currentFolderKey) {
           return;
         }
 
-        const cacheKey = getPageCountCacheKey(file.name);
+        const cacheKey = getPageCountCacheKey(folderKeyAtStart, file.name);
         let count = pageCountCache.get(cacheKey) || getStoredPageCount(cacheKey);
 
         if (!count) {
           try {
-            count = await getPdfPageCount(file.name);
+            count = await getPdfPageCount(file.name, folderKeyAtStart);
           } catch (error) {
             console.error(error);
             count = "—";
@@ -582,10 +615,11 @@
           }
         }
 
-        const cell = rowsEl.querySelector(`[data-pages-for="${CSS.escape(file.name)}"]`);
+        const selector = `[data-pages-folder="${CSS.escape(folderKeyAtStart)}"][data-pages-file="${CSS.escape(file.name)}"]`;
+        const cell = rowsEl.querySelector(selector);
 
         if (cell) {
-          cell.textContent = count === "—" ? "—" : `${count}`;
+          cell.textContent = count === "—" ? "—" : String(count);
         }
       }
     }
@@ -631,29 +665,35 @@
       countBadgeEl.textContent = `${files.length} dosya`;
       setZipLoadingState(false, "ZIP indir");
 
+      const folderKeyAtRender = currentFolderKey;
+
       for (const [index, file] of files.entries()) {
         const row = document.createElement("div");
         row.className = "row";
 
         const viewerUrl = buildViewerUrl(file.name);
-        const pdfUrl = getPagesPdfUrl(file.name);
-        const cacheKey = getPageCountCacheKey(file.name);
+        const pdfUrl = getPagesPdfUrl(file.name, folderKeyAtRender);
+        const cacheKey = getPageCountCacheKey(folderKeyAtRender, file.name);
         const cachedPageCount = pageCountCache.get(cacheKey) || getStoredPageCount(cacheKey);
 
         row.innerHTML = `
           <div class="index">${index + 1}</div>
-          <a class="name-link" href="${escapeHtml(viewerUrl)}">
+          <a class="name-link" href="${escapeAttr(viewerUrl)}">
             <div class="name">${escapeHtml(formatName(file.name))}</div>
           </a>
-          <div class="pages" data-pages-for="${escapeHtml(file.name)}">${cachedPageCount || "…"}</div>
+          <div
+            class="pages"
+            data-pages-folder="${escapeAttr(folderKeyAtRender)}"
+            data-pages-file="${escapeAttr(file.name)}"
+          >${cachedPageCount || "…"}</div>
           <div class="size">${escapeHtml(formatSize(file.size))}</div>
-          <a class="download-btn" href="${escapeHtml(pdfUrl)}" download="${escapeHtml(file.name)}">İndir</a>
+          <a class="download-btn" href="${escapeAttr(pdfUrl)}" download="${escapeAttr(file.name)}">İndir</a>
         `;
 
         rowsEl.appendChild(row);
       }
 
-      fillPageCounts(files);
+      fillPageCounts(files, folderKeyAtRender);
     }
 
     function applyFilter() {
@@ -760,7 +800,7 @@
         for (const [index, file] of visibleFiles.entries()) {
           setZipLoadingState(true, `${index + 1} / ${visibleFiles.length}`);
 
-          const pdfUrl = getPagesPdfUrl(file.name);
+          const pdfUrl = getPagesPdfUrl(file.name, currentFolderKey);
           const response = await fetch(pdfUrl);
 
           if (!response.ok) {
@@ -838,3 +878,4 @@
   </script>
 </body>
 </html>
+
