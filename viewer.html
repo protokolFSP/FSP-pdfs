@@ -365,7 +365,6 @@
 
     const state = {
       pdfDoc: null,
-      loadingTask: null,
       pageCount: 0,
       currentPage: 1,
       scale: 1,
@@ -392,38 +391,12 @@
       return Math.min(max, Math.max(min, value));
     }
 
-    function decodeURIComponentSafe(value) {
-      try {
-        return decodeURIComponent(value);
-      } catch {
-        return value;
-      }
-    }
-
-    function getMetaLabel() {
-      if (!pdfUrl) return "PDF URL eksik";
-
-      try {
-        const url = new URL(pdfUrl, location.href);
-        const host = url.host || "";
-        if (state.pageCount > 0) {
-          return `${state.pageCount} sayfa${host ? ` · ${host}` : ""}`;
-        }
-        return host || decodeURIComponentSafe(pdfUrl);
-      } catch {
-        if (state.pageCount > 0) {
-          return `${state.pageCount} sayfa`;
-        }
-        return decodeURIComponentSafe(pdfUrl);
-      }
-    }
-
     function updateToolbar() {
       const count = state.pageCount || 0;
       const page = clamp(state.currentPage, 1, Math.max(1, count || 1));
 
       docTitleEl.textContent = decodeURIComponentSafe(docName);
-      docMetaEl.textContent = getMetaLabel();
+      docMetaEl.textContent = pdfUrl ? decodeURIComponentSafe(pdfUrl) : "PDF URL eksik";
       pageInputEl.value = String(page);
       pageCountBtnEl.textContent = `/ ${count}`;
       zoomLabelEl.textContent = `${Math.round(state.scale * 100)}%`;
@@ -437,46 +410,18 @@
       downloadBtn.disabled = !pdfUrl;
     }
 
+    function decodeURIComponentSafe(value) {
+      try {
+        return decodeURIComponent(value);
+      } catch {
+        return value;
+      }
+    }
+
     function estimateFitScale(viewportWidth, pageWidth) {
       const horizontalPadding = 2;
       const available = Math.max(320, viewportWidth - 24 - horizontalPadding);
       return clamp(available / pageWidth, 0.35, 4);
-    }
-
-    async function cleanupPdf() {
-      state.renderToken += 1;
-
-      for (const view of state.pageViews) {
-        if (view.renderTask) {
-          const previousTask = view.renderTask;
-          view.renderTask = null;
-          try {
-            previousTask.cancel();
-            await previousTask.promise;
-          } catch {
-          }
-        }
-      }
-
-      if (state.loadingTask) {
-        try {
-          await state.loadingTask.destroy();
-        } catch {
-        }
-        state.loadingTask = null;
-      }
-
-      if (state.pdfDoc) {
-        try {
-          await state.pdfDoc.destroy();
-        } catch {
-        }
-        state.pdfDoc = null;
-      }
-
-      state.pageViews = [];
-      state.pageCount = 0;
-      viewerEl.innerHTML = "";
     }
 
     async function createPageShell(pageNumber) {
@@ -528,16 +473,13 @@
       if (!view || token !== state.renderToken) return;
 
       if (view.renderTask) {
-        const previousTask = view.renderTask;
-        view.renderTask = null;
         try {
-          previousTask.cancel();
-          await previousTask.promise;
-        } catch {
-        }
+          view.renderTask.cancel();
+        } catch {}
+        view.renderTask = null;
       }
 
-      const outputScale = Math.min(2, Math.max(1, window.devicePixelRatio || 1));
+      const outputScale = Math.max(1, window.devicePixelRatio || 1);
       const viewport = view.page.getViewport({ scale: state.scale });
 
       const canvas = view.canvas;
@@ -580,7 +522,6 @@
 
       await textLayer.render();
       view.renderedScale = state.scale;
-      view.renderTask = null;
     }
 
     async function renderAllPages() {
@@ -640,13 +581,10 @@
       if (!state.pdfDoc || !state.pageViews.length) return;
       const first = state.pageViews[0];
       const newScale = estimateFitScale(viewerWrap.clientWidth, first.baseViewport.width);
-
       if (Math.abs(newScale - state.scale) < 0.001) {
-        state.fitMode = true;
         updateToolbar();
         return;
       }
-
       state.scale = newScale;
       state.fitMode = true;
       updateToolbar();
@@ -655,12 +593,10 @@
 
     async function setScale(nextScale, fitMode = false) {
       const clamped = clamp(nextScale, 0.35, 4);
-
       if (Math.abs(clamped - state.scale) < 0.001 && fitMode === state.fitMode) {
         updateToolbar();
         return;
       }
-
       state.scale = clamped;
       state.fitMode = fitMode;
       updateToolbar();
@@ -668,7 +604,6 @@
     }
 
     async function loadPdf() {
-      await cleanupPdf();
       clearError();
 
       if (!pdfUrl) {
@@ -681,7 +616,7 @@
       setLoading(true, "PDF indiriliyor…");
 
       try {
-        state.loadingTask = pdfjsLib.getDocument({
+        const loadingTask = pdfjsLib.getDocument({
           url: pdfUrl,
           withCredentials: false,
           cMapPacked: true,
@@ -693,7 +628,7 @@
           disableAutoFetch: false
         });
 
-        const pdfDoc = await state.loadingTask.promise;
+        const pdfDoc = await loadingTask.promise;
         state.pdfDoc = pdfDoc;
         state.pageCount = pdfDoc.numPages;
         state.currentPage = 1;
@@ -728,13 +663,11 @@
     pageInputEl.addEventListener("keydown", (event) => {
       if (event.key !== "Enter") return;
       event.preventDefault();
-
       const next = Number(pageInputEl.value);
       if (!Number.isFinite(next)) {
         pageInputEl.value = String(state.currentPage);
         return;
       }
-
       state.currentPage = clamp(Math.round(next), 1, state.pageCount || 1);
       updateToolbar();
       scrollToPage(state.currentPage);
@@ -816,10 +749,6 @@
         event.preventDefault();
         await applyFit();
       }
-    });
-
-    window.addEventListener("beforeunload", () => {
-      cleanupPdf().catch(() => {});
     });
 
     updateToolbar();
