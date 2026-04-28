@@ -222,6 +222,7 @@
       text-decoration: none;
       min-width: 0;
       display: block;
+      cursor: pointer;
     }
 
     .name-link:hover .name {
@@ -276,6 +277,91 @@
       border-radius: 8px;
     }
 
+    #pdfOverlay {
+      position: fixed;
+      inset: 0;
+      z-index: 10080;
+      display: none;
+      background: rgba(0, 0, 0, .32);
+    }
+
+    #pdfOverlay.open {
+      display: block;
+    }
+
+    #pdfPanel {
+      position: absolute;
+      inset: 12px;
+      background: #fff;
+      border-radius: 18px;
+      border: 1.5px solid #d6d6d6;
+      border-right-color: #bdbdbd;
+      border-bottom-color: #b3b3b3;
+      box-shadow:
+        10px 34px 86px rgba(0, 0, 0, .20),
+        4px 14px 30px rgba(0, 0, 0, .10),
+        0 2px 6px rgba(0, 0, 0, .06);
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    #pdfHeader {
+      padding: 10px 12px;
+      background: #fbfbfb;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      border-bottom: 1px solid #ececec;
+      flex-wrap: wrap;
+    }
+
+    #pdfTitle {
+      font-weight: 750;
+      font-size: 1rem;
+      min-width: 0;
+      flex: 1 1 auto;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    #pdfBtns {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      flex: 0 0 auto;
+    }
+
+    .pdfActionBtn {
+      height: 38px;
+      padding: 0 12px;
+      border-radius: 12px;
+      border: 1px solid #d8d8d8;
+      background: white;
+      cursor: pointer;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      font-weight: 700;
+      font-size: .92rem;
+      user-select: none;
+    }
+
+    .pdfActionBtn:hover {
+      background: #f7f7f7;
+    }
+
+    #pdfViewerHost {
+      width: 100%;
+      height: 100%;
+      flex: 1 1 auto;
+      background: #fff;
+      overflow: auto;
+    }
+
     @media (max-width: 860px) {
       body {
         padding: 16px;
@@ -317,6 +403,21 @@
         padding: 0 8px;
         font-size: 12px;
       }
+
+      #pdfHeader {
+        flex-wrap: wrap;
+      }
+
+      #pdfTitle {
+        flex: 1 1 100%;
+        white-space: normal;
+        overflow: visible;
+        text-overflow: clip;
+      }
+
+      #pdfBtns {
+        width: 100%;
+      }
     }
   </style>
 </head>
@@ -338,7 +439,7 @@
         </button>
       </div>
 
-      <div class="note">Dosya adına tıklayınca PDF.js görüntüleyici açılır. Sağdaki butondan doğrudan indirebilirsiniz.</div>
+      <div class="note">Dosya adına tıklayınca görüntüleyici açılır. Sağdaki butondan doğrudan indirebilirsiniz.</div>
     </section>
 
     <section class="panel">
@@ -355,12 +456,26 @@
     </section>
   </main>
 
+  <div id="pdfOverlay" aria-hidden="true">
+    <div id="pdfPanel" role="dialog" aria-label="PDF">
+      <div id="pdfHeader">
+        <div id="pdfTitle">PDF</div>
+        <div id="pdfBtns">
+          <button id="pdfOpenNewBtn" class="pdfActionBtn" type="button">Yeni sekme</button>
+          <button id="pdfDownloadBtn" class="pdfActionBtn" type="button">İndir</button>
+          <button id="pdfCloseBtn" class="pdfActionBtn" type="button">Kapat</button>
+        </div>
+      </div>
+      <div id="pdfViewerHost"></div>
+    </div>
+  </div>
+
   <script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
   <script type="module">
-    import * as pdfjsLib from "https://cdn.jsdelivr.net/npm/pdfjs-dist@5.6.205/build/pdf.min.mjs";
+    import * as pdfjsLib from "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.4.168/build/pdf.min.mjs";
 
     pdfjsLib.GlobalWorkerOptions.workerSrc =
-      "https://cdn.jsdelivr.net/npm/pdfjs-dist@5.6.205/build/pdf.worker.min.mjs";
+      "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.4.168/build/pdf.worker.min.mjs";
 
     const owner = "protokolFSP";
     const repo = "FSP-pdfs";
@@ -377,13 +492,23 @@
     const zipBtnTextEl = document.getElementById("zipBtnText");
     const zipSpinnerEl = document.getElementById("zipSpinner");
 
+    const pdfOverlay = document.getElementById("pdfOverlay");
+    const pdfViewerHost = document.getElementById("pdfViewerHost");
+    const pdfTitleEl = document.getElementById("pdfTitle");
+    const pdfOpenNewBtn = document.getElementById("pdfOpenNewBtn");
+    const pdfDownloadBtn = document.getElementById("pdfDownloadBtn");
+    const pdfCloseBtn = document.getElementById("pdfCloseBtn");
+
     let topFolders = [];
     let allFiles = [];
     let visibleFiles = [];
     let currentFolderKey = "";
     let loadAbortController = null;
     const pageCountCache = new Map();
-    const pageCountTaskCache = new Map();
+
+    const pdfState = {
+      current: null
+    };
 
     function escapeHtml(value) {
       return String(value)
@@ -392,10 +517,6 @@
         .replaceAll(">", "&gt;")
         .replaceAll('"', "&quot;")
         .replaceAll("'", "&#39;");
-    }
-
-    function escapeAttr(value) {
-      return escapeHtml(value);
     }
 
     function formatName(filename) {
@@ -466,24 +587,13 @@
       return `${rootDocsPath}/${folderKey}`;
     }
 
-    function getPagesPdfUrl(fileName, folderKey = currentFolderKey) {
-      const encodedFolderPath = getFolderPath(folderKey)
+    function getPagesPdfUrl(fileName) {
+      const encodedFolderPath = getFolderPath(currentFolderKey)
         .split("/")
         .map(encodeURIComponent)
         .join("/");
 
       return `${window.location.origin}${getRepoBasePath()}/${encodedFolderPath}/${encodeURIComponent(fileName)}`;
-    }
-
-    function buildViewerUrl(fileName) {
-      const pdfUrl = getPagesPdfUrl(fileName, currentFolderKey);
-      const params = new URLSearchParams();
-
-      params.set("pdf", pdfUrl);
-      params.set("name", fileName);
-      params.set("folder", currentFolderKey);
-
-      return `viewer.html?${params.toString()}`;
     }
 
     function getFolderFromUrl() {
@@ -512,8 +622,8 @@
       zipBtnTextEl.textContent = text;
     }
 
-    function getPageCountCacheKey(folderKey, fileName) {
-      return `${folderKey}::${fileName}`;
+    function getPageCountCacheKey(fileName) {
+      return `${currentFolderKey}::${fileName}`;
     }
 
     function getStoredPageCount(cacheKey) {
@@ -534,16 +644,8 @@
       }
     }
 
-    async function destroyPdfDocument(pdf) {
-      if (!pdf || typeof pdf.destroy !== "function") return;
-      try {
-        await pdf.destroy();
-      } catch {
-      }
-    }
-
-    async function getPdfPageCount(fileName, folderKey = currentFolderKey) {
-      const cacheKey = getPageCountCacheKey(folderKey, fileName);
+    async function getPdfPageCount(fileName) {
+      const cacheKey = getPageCountCacheKey(fileName);
 
       if (pageCountCache.has(cacheKey)) {
         return pageCountCache.get(cacheKey);
@@ -555,59 +657,39 @@
         return stored;
       }
 
-      if (pageCountTaskCache.has(cacheKey)) {
-        return pageCountTaskCache.get(cacheKey);
+      const pdfUrl = getPagesPdfUrl(fileName);
+      const task = pdfjsLib.getDocument({
+        url: pdfUrl,
+        withCredentials: false
+      });
+
+      const pdf = await task.promise;
+      const count = pdf.numPages;
+
+      pageCountCache.set(cacheKey, count);
+      setStoredPageCount(cacheKey, count);
+
+      if (typeof pdf.destroy === "function") {
+        pdf.destroy();
       }
 
-      const taskPromise = (async () => {
-        const pdfUrl = getPagesPdfUrl(fileName, folderKey);
-        const loadingTask = pdfjsLib.getDocument({
-          url: pdfUrl,
-          withCredentials: false,
-          useWorkerFetch: true,
-          disableRange: false,
-          disableStream: false,
-          disableAutoFetch: false
-        });
-
-        let pdf = null;
-
-        try {
-          pdf = await loadingTask.promise;
-          const count = pdf.numPages;
-          pageCountCache.set(cacheKey, count);
-          setStoredPageCount(cacheKey, count);
-          return count;
-        } finally {
-          try {
-            await loadingTask.destroy();
-          } catch {
-          }
-          await destroyPdfDocument(pdf);
-        }
-      })();
-
-      pageCountTaskCache.set(cacheKey, taskPromise);
-
-      try {
-        return await taskPromise;
-      } finally {
-        pageCountTaskCache.delete(cacheKey);
-      }
+      return count;
     }
 
-    async function fillPageCounts(files, folderKeyAtStart) {
+    async function fillPageCounts(files) {
+      const activeFolderAtStart = currentFolderKey;
+
       for (const file of files) {
-        if (folderKeyAtStart !== currentFolderKey) {
+        if (activeFolderAtStart !== currentFolderKey) {
           return;
         }
 
-        const cacheKey = getPageCountCacheKey(folderKeyAtStart, file.name);
+        const cacheKey = getPageCountCacheKey(file.name);
         let count = pageCountCache.get(cacheKey) || getStoredPageCount(cacheKey);
 
         if (!count) {
           try {
-            count = await getPdfPageCount(file.name, folderKeyAtStart);
+            count = await getPdfPageCount(file.name);
           } catch (error) {
             console.error(error);
             count = "—";
@@ -615,13 +697,77 @@
           }
         }
 
-        const selector = `[data-pages-folder="${CSS.escape(folderKeyAtStart)}"][data-pages-file="${CSS.escape(file.name)}"]`;
-        const cell = rowsEl.querySelector(selector);
+        const cell = rowsEl.querySelector(`[data-pages-for="${CSS.escape(file.name)}"]`);
 
         if (cell) {
-          cell.textContent = count === "—" ? "—" : String(count);
+          cell.textContent = count === "—" ? "—" : `${count}`;
         }
       }
+    }
+
+    function buildPdfAbsoluteUrl(path) {
+      try {
+        return new URL(path, location.href).toString();
+      } catch {
+        return path;
+      }
+    }
+
+    function buildPdfObjectHtml(pdfUrl, title) {
+      const safeUrl = escapeHtml(pdfUrl);
+      const safeTitle = escapeHtml(title || "PDF");
+
+      return `
+        <object
+          data="${safeUrl}"
+          type="application/pdf"
+          width="100%"
+          height="100%"
+          style="display:block;width:100%;height:100%;border:0;background:#fff;"
+          aria-label="${safeTitle}">
+          <div style="padding:16px;line-height:1.45;font-size:15px;">
+            <div style="font-weight:700;margin-bottom:8px;">PDF bu tarayıcıda gömülü açılamadı.</div>
+            <a href="${safeUrl}" target="_blank" rel="noopener noreferrer">Yeni sekmede aç</a>
+          </div>
+        </object>
+      `;
+    }
+
+    function clickDownload(href, filename) {
+      const a = document.createElement("a");
+      a.href = href;
+      a.rel = "noopener";
+      a.target = "_blank";
+      if (filename) a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    }
+
+    function openPdfViewer(file) {
+      if (!file) return;
+
+      const pdfUrl = buildPdfAbsoluteUrl(getPagesPdfUrl(file.name));
+      const title = file.name || "PDF";
+
+      pdfState.current = {
+        file,
+        url: pdfUrl
+      };
+
+      pdfTitleEl.textContent = title;
+      pdfViewerHost.innerHTML = buildPdfObjectHtml(pdfUrl, title);
+      pdfOverlay.classList.add("open");
+      pdfOverlay.setAttribute("aria-hidden", "false");
+      document.body.style.overflow = "hidden";
+    }
+
+    function closePdfViewer() {
+      pdfOverlay.classList.remove("open");
+      pdfOverlay.setAttribute("aria-hidden", "true");
+      pdfViewerHost.innerHTML = "";
+      pdfState.current = null;
+      document.body.style.overflow = "";
     }
 
     function renderFolders() {
@@ -665,35 +811,34 @@
       countBadgeEl.textContent = `${files.length} dosya`;
       setZipLoadingState(false, "ZIP indir");
 
-      const folderKeyAtRender = currentFolderKey;
-
       for (const [index, file] of files.entries()) {
         const row = document.createElement("div");
         row.className = "row";
 
-        const viewerUrl = buildViewerUrl(file.name);
-        const pdfUrl = getPagesPdfUrl(file.name, folderKeyAtRender);
-        const cacheKey = getPageCountCacheKey(folderKeyAtRender, file.name);
+        const pdfUrl = getPagesPdfUrl(file.name);
+        const cacheKey = getPageCountCacheKey(file.name);
         const cachedPageCount = pageCountCache.get(cacheKey) || getStoredPageCount(cacheKey);
 
         row.innerHTML = `
           <div class="index">${index + 1}</div>
-          <a class="name-link" href="${escapeAttr(viewerUrl)}">
+          <a class="name-link" href="#" data-open-pdf="${escapeHtml(file.name)}">
             <div class="name">${escapeHtml(formatName(file.name))}</div>
           </a>
-          <div
-            class="pages"
-            data-pages-folder="${escapeAttr(folderKeyAtRender)}"
-            data-pages-file="${escapeAttr(file.name)}"
-          >${cachedPageCount || "…"}</div>
+          <div class="pages" data-pages-for="${escapeHtml(file.name)}">${cachedPageCount || "…"}</div>
           <div class="size">${escapeHtml(formatSize(file.size))}</div>
-          <a class="download-btn" href="${escapeAttr(pdfUrl)}" download="${escapeAttr(file.name)}">İndir</a>
+          <a class="download-btn" href="${escapeHtml(pdfUrl)}" download="${escapeHtml(file.name)}">İndir</a>
         `;
+
+        const openLink = row.querySelector('[data-open-pdf]');
+        openLink.addEventListener('click', (event) => {
+          event.preventDefault();
+          openPdfViewer(file);
+        });
 
         rowsEl.appendChild(row);
       }
 
-      fillPageCounts(files, folderKeyAtRender);
+      fillPageCounts(files);
     }
 
     function applyFilter() {
@@ -800,7 +945,7 @@
         for (const [index, file] of visibleFiles.entries()) {
           setZipLoadingState(true, `${index + 1} / ${visibleFiles.length}`);
 
-          const pdfUrl = getPagesPdfUrl(file.name, currentFolderKey);
+          const pdfUrl = getPagesPdfUrl(file.name);
           const response = await fetch(pdfUrl);
 
           if (!response.ok) {
@@ -871,6 +1016,31 @@
       await loadFiles();
     });
 
+    pdfCloseBtn.addEventListener("click", closePdfViewer);
+
+    pdfOverlay.addEventListener("click", (event) => {
+      if (event.target === pdfOverlay) {
+        closePdfViewer();
+      }
+    });
+
+    pdfOpenNewBtn.addEventListener("click", () => {
+      if (!pdfState.current?.url) return;
+      window.open(pdfState.current.url, "_blank", "noopener,noreferrer");
+    });
+
+    pdfDownloadBtn.addEventListener("click", () => {
+      if (!pdfState.current?.url) return;
+      clickDownload(pdfState.current.url, pdfState.current.file?.name || "document.pdf");
+    });
+
+    document.addEventListener("keydown", (event) => {
+      if (event.key === "Escape" && pdfOverlay.classList.contains("open")) {
+        event.preventDefault();
+        closePdfViewer();
+      }
+    });
+
     zipBtnEl.addEventListener("click", downloadCurrentFolderAsZip);
     searchInputEl.addEventListener("input", applyFilter);
 
@@ -878,4 +1048,3 @@
   </script>
 </body>
 </html>
-
