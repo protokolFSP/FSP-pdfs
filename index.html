@@ -184,6 +184,7 @@
     .state {
       padding: 20px 22px;
       color: var(--muted);
+      white-space: pre-line;
     }
 
     .rows {
@@ -563,11 +564,18 @@
     async function fetchRepoContents(path, signal) {
       const response = await fetch(buildGithubContentsUrl(path), {
         signal,
-        headers: { Accept: "application/vnd.github+json" }
+        headers: {
+          Accept: "application/vnd.github+json",
+          "X-GitHub-Api-Version": "2022-11-28"
+        }
       });
 
       if (response.status === 404) {
         return [];
+      }
+
+      if (response.status === 403 || response.status === 429) {
+        throw new Error("GitHub API limitine takıldı. Lütfen daha sonra tekrar deneyin.");
       }
 
       if (!response.ok) {
@@ -579,8 +587,7 @@
     }
 
     function getRepoBasePath() {
-      const firstSegment = window.location.pathname.split("/").filter(Boolean)[0];
-      return firstSegment ? `/${firstSegment}` : "";
+      return ".";
     }
 
     function getFolderPath(folderKey) {
@@ -593,7 +600,7 @@
         .map(encodeURIComponent)
         .join("/");
 
-      return `${window.location.origin}${getRepoBasePath()}/${encodedFolderPath}/${encodeURIComponent(fileName)}`;
+      return `${getRepoBasePath()}/${encodedFolderPath}/${encodeURIComponent(fileName)}`;
     }
 
     function getFolderFromUrl() {
@@ -927,7 +934,10 @@
         visibleFiles = [];
         rowsEl.hidden = true;
         stateEl.hidden = false;
-        stateEl.textContent = "PDF listesi yüklenemedi.";
+        stateEl.textContent =
+          error.message === "GitHub API limitine takıldı. Lütfen daha sonra tekrar deneyin."
+            ? "GitHub API limitine takıldı.\nBir süre sonra tekrar deneyin."
+            : "PDF listesi yüklenemedi.";
         countBadgeEl.textContent = "Hata";
         zipBtnEl.disabled = true;
         console.error(error);
@@ -993,7 +1003,10 @@
         folderBarEl.innerHTML = "";
         rowsEl.hidden = true;
         stateEl.hidden = false;
-        stateEl.textContent = "Klasörler yüklenemedi.";
+        stateEl.textContent =
+          error.message === "GitHub API limitine takıldı. Lütfen daha sonra tekrar deneyin."
+            ? "GitHub API limitine takıldı.\nBir süre sonra tekrar deneyin."
+            : "Klasörler yüklenemedi.";
         countBadgeEl.textContent = "Hata";
         zipBtnEl.disabled = true;
         console.error(error);
